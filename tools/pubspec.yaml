@@ -1,0 +1,6 @@
+name: qa_bug_session_tools
+description: Standalone runners for qa_bug_session (setup + registry codegen).
+publish_to: none
+
+environment:
+  sdk: ^3.5.0

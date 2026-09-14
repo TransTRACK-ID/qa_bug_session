@@ -2,6 +2,12 @@
 
 All notable changes are documented here. **1.0.0** is the first stable release; prior `0.x` tags on GitHub were pre-release iteration and are no longer maintained.
 
+## 1.1.0
+
+- **Default video host** in-package: `BugSessionDefaultVideoCapture`, `wrapBugSessionDefaultVideoHost` (ScreenRecorder + MP4 encoder deps on package).
+- **Zero-touch setup**: `tools/setup_bug_session.dart` scans the app, generates `lib/bug_session/`, patches main/app/router/Dio, always runs registry codegen.
+- Registry codegen skips dynamic `\$…` button labels.
+
 ## 1.0.0
 
 - **Capture:** Instant Replay (Shadowplay buffer) and Full Record modes; unified FAB control panel; recording overlay states (SHADOWPLAY / RECORD / Saving / REPLAY).

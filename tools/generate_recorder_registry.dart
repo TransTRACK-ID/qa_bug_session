@@ -1,3 +1,4 @@
+// @dart=3.12
 // ignore_for_file: avoid_print
 //
 // Scans a Flutter app for tappable widgets and generates BugSession registry
@@ -191,6 +192,9 @@ List<_Target> _scanFile({
 
   void add(String kind, String label) {
     if (label.isEmpty || label == 'tap') {
+      return;
+    }
+    if (label.contains(r'$')) {
       return;
     }
     final id = _registryId(

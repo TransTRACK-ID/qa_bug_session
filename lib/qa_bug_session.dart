@@ -21,6 +21,7 @@ export 'bug_session/models/manifest.dart';
 export 'bug_session/models/network_event.dart';
 export 'bug_session/models/recorded_action.dart';
 export 'bug_session/recording/bug_session_recorder.dart';
+export 'bug_session/host/bug_session_default_video_host.dart';
 export 'bug_session/recording/bug_session_video_capture.dart';
 export 'bug_session/recording/bug_session_video_visual_capture.dart';
 export 'bug_session/recording/semantic_interaction_recorder.dart';

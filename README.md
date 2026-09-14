@@ -63,6 +63,14 @@ dart run path/to/qa_bug_session/tools/generate_recorder_registry.dart \
 
 Details: [tools/README.md](tools/README.md).
 
+### New project bootstrap
+
+```bash
+dart run path/to/qa_bug_session/tools/setup_bug_session.dart --project-dir /path/to/app --with-registry
+```
+
+Generates host wiring under `lib/bug_session/` and updates `pubspec.yaml`; see generated `INTEGRATION.md`.
+
 ## Add to a new project in 5 minutes
 
 1. Add the git dependency and run `flutter pub get`.
