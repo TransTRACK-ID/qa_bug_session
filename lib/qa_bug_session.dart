@@ -43,6 +43,7 @@ export 'bug_session/serialization/bug_session_serializer.dart';
 export 'bug_session/ui/bug_session_control_panel.dart';
 export 'bug_session/ui/bug_session_flight_log_sheet.dart';
 export 'bug_session/ui/bug_session_library_sheet.dart';
+export 'bug_session/ui/bug_session_ready_to_test_sheet.dart';
 export 'bug_session/ui/bug_session_overlay.dart';
 export 'bug_session/ui/bug_session_replay_flow.dart';
 export 'bug_session/shadowplay/shadowplay_mode.dart';

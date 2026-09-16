@@ -11,6 +11,7 @@ import '../replay/bug_session_replayer.dart';
 import '../runtime/bug_session_environment.dart';
 import 'bug_session_capture_mode.dart';
 import 'bug_session_library_sheet.dart';
+import 'bug_session_ready_to_test_sheet.dart';
 import 'bug_session_name_dialog.dart';
 import 'bug_session_replay_flow.dart';
 import 'bug_session_panel_help.dart';
@@ -605,6 +606,23 @@ class _BugSessionControlPanelState extends State<BugSessionControlPanel> {
                             }
                           },
                         ),
+                        if (kit.config.readyToTestEnabled) ...[
+                          const SizedBox(height: 6),
+                          GlassButton(
+                            theme: theme,
+                            label: 'Ready to Test',
+                            onPressed: () async {
+                              try {
+                                await BugSessionReadyToTestSheet.show(
+                                  context,
+                                  kit: kit,
+                                );
+                              } on StateError catch (e) {
+                                setState(() => _status = e.message);
+                              }
+                            },
+                          ),
+                        ],
                         const SizedBox(height: 6),
                         GlassButton(
                           theme: theme,

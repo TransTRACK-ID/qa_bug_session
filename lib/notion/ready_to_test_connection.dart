@@ -56,11 +56,12 @@ abstract class ReadyToTestCredentialsStore {
   Future<void> clear();
 }
 
-/// Defaults baked in at setup time (data source id, QA user id, optional product).
+/// Optional filter property names / status label (not secrets).
+/// QA enters token and ids in-app via the BugSession sheet.
 class ReadyToTestSetupDefaults {
   const ReadyToTestSetupDefaults({
-    required this.dataSourceId,
-    required this.qaUserId,
+    this.dataSourceId = '',
+    this.qaUserId = '',
     this.productDomain,
     this.statusEquals = 'Ready to Test',
     this.statusPropertyName = 'Status',

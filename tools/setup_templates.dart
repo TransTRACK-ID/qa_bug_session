@@ -623,7 +623,8 @@ $picker
 $share
 $nav
 $hooks
-import 'notion_ready_to_test_host.dart';
+import 'notion_ready_to_test_defaults.dart';
+import 'notion_ready_to_test_storage.dart';
 
 import 'bug_session_kit_holder.dart';
 
@@ -668,6 +669,8 @@ Future<void> initializeBugSession() async {
         return bugSessionEnvironmentSnapshot.build() ??
             bugSessionEnvironmentSnapshot.buildForReplay();
       },
+      readyToTestStore: notionReadyToTestStore,
+      readyToTestDefaults: notionReadyToTestDefaults,
     ),
   );
   registerBugSessionKit(kit);
@@ -686,11 +689,9 @@ TransitionBuilder? bugSessionMaterialAppBuilder() {
     return null;
   }
   return bugSessionKit.wrapMaterialAppBuilder(
-    (context, child) => wrapReadyToTestTools(
-      child: wrapBugSessionDefaultVideoHost(
-        child ?? const SizedBox.shrink(),
-        enabled: isBugSessionToolsEnabled,
-      ),
+    (context, child) => wrapBugSessionDefaultVideoHost(
+      child ?? const SizedBox.shrink(),
+      enabled: isBugSessionToolsEnabled,
     ),
   );
 }

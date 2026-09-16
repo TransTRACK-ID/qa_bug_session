@@ -323,7 +323,7 @@ _Options _parseArgs(List<String> args) {
   var registryOutput = 'lib/generated/bug_session_recorder_registry.g.dart';
   String? packageName;
   var gitUrl = 'https://github.com/TransTRACK-ID/qa_bug_session.git';
-  var gitRef = 'v1.3.1';
+  var gitRef = 'v1.3.2';
   String? routerDir;
   var force = false;
   var notionDataSourceId = '';
@@ -401,7 +401,7 @@ setup_bug_session.dart — zero-touch BugSession + Ready to Test host integratio
 
   --project-dir PATH     Flutter app root (default: cwd)
   --router-dir PATH      Retry: directory with GoRoute definitions
-  --git-ref REF          qa_bug_session tag (default: v1.3.0)
+  --git-ref REF          qa_bug_session tag (default: v1.3.1)
   --notion-data-source-id ID   Baked into generated Notion defaults
   --notion-qa-user-id ID       QA people-property user id
   --notion-product NAME        Optional product domain filter

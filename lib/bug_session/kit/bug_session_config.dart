@@ -11,6 +11,7 @@ import '../replay/replay_result.dart';
 import '../shadowplay/shadowplay_settings.dart';
 import '../runtime/bug_session_environment.dart';
 import '../security/credential_injector.dart';
+import '../../notion/ready_to_test_connection.dart';
 import 'bug_session_file_picker.dart';
 import 'bug_session_theme.dart';
 
@@ -101,6 +102,8 @@ class BugSessionConfig {
     this.manualRecordWithShadowplay = false,
     this.onReplayFinished,
     this.expandPanelWhenSheetClosed = true,
+    this.readyToTestStore,
+    this.readyToTestDefaults,
   });
 
   final bool enabled;
@@ -175,6 +178,15 @@ class BugSessionConfig {
 
   /// When true, closing a BugSession bottom sheet re-expands the FAB panel.
   final bool expandPanelWhenSheetClosed;
+
+  /// When set with [readyToTestDefaults], shows Ready to Test on the FAB panel.
+  final ReadyToTestCredentialsStore? readyToTestStore;
+
+  /// Status / property names for Notion filters (ids entered by QA in-app).
+  final ReadyToTestSetupDefaults? readyToTestDefaults;
+
+  bool get readyToTestEnabled =>
+      readyToTestStore != null && readyToTestDefaults != null;
 
   BugSessionThemeData get resolvedTheme =>
       theme ?? BugSessionThemeData.defaults;

@@ -2,6 +2,12 @@
 
 All notable changes are documented here. **1.0.0** is the first stable release; prior `0.x` tags on GitHub were pre-release iteration and are no longer maintained.
 
+## 1.3.2
+
+- **Ready to Test:** Opens from the BugSession FAB panel (glass bottom sheet + inner navigator, same as Saved sessions). No separate FAB on the app root — fixes Navigator context errors.
+- **Notion credentials:** QA enters integration token, data source id, QA user id (and optional product) in-app; setup no longer bakes ids into the host.
+- **`BugSessionConfig`:** `readyToTestStore` + `readyToTestDefaults`.
+
 ## 1.3.1
 
 - **Setup:** `BugSessionStorage` no longer calls `userRepository` before GetIt registration (maritime-style apps); detects `kUserId` / `kKeyProfileName` for secure-storage hosts; auto_route scan from `@AutoRouterConfig`; pubspec bump from `v1.2.0`.
