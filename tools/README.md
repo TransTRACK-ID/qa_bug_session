@@ -38,3 +38,21 @@ dart run generate_recorder_registry.dart --project-dir /path/to/app
 ```
 
 See generated `lib/generated/bug_session_recorder_registry.g.dart`.
+
+---
+
+## Notion — Ready to Test (`tools/nts`)
+
+Bash CLI shipped with this repo (also usable from PATH). Requires bash 4+, `curl`, and `jq`.
+
+```bash
+export NOTION_TOKEN='ntn_...'
+export NOTION_DATA_SOURCE_ID='...'
+export NOTION_QA_USER_ID='...'   # QA people-property user id
+
+./tools/nts list --product "Product A" --json
+./tools/nts show --page <page-id> --json
+./tools/nts sync-todos --page <page-id> --file todo-changes.json -y
+```
+
+Dart API: see [docs/NOTION_READY_TO_TEST.md](../docs/NOTION_READY_TO_TEST.md).

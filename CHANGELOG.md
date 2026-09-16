@@ -2,6 +2,11 @@
 
 All notable changes are documented here. **1.0.0** is the first stable release; prior `0.x` tags on GitHub were pre-release iteration and are no longer maintained.
 
+## 1.2.0
+
+- **Ready to Test (Notion):** Dart client (`NotionClient`, `ReadyToTestService`, `NotionTaskStatusService`) for filtered list, read-only task detail, and to-do checkbox sync.
+- **`tools/nts`:** subcommands `list`, `show`, `sync-todos` alongside legacy status updates; documented in `docs/NOTION_READY_TO_TEST.md`.
+
 ## 1.1.0
 
 - **Default video host** in-package: `BugSessionDefaultVideoCapture`, `wrapBugSessionDefaultVideoHost` (ScreenRecorder + MP4 encoder deps on package).

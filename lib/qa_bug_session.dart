@@ -53,3 +53,4 @@ export 'bug_session/ui/bug_session_session_actions.dart';
 export 'bug_session/ui/bug_session_share_visual.dart';
 export 'bug_session/ui/recorder_tap.dart';
 export 'bug_session/ui/recording_overlay.dart';
+export 'notion/notion.dart';
