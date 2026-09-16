@@ -74,6 +74,26 @@ Add `--json` on `list` or `show` for machine-readable output.
 }
 ```
 
+## Zero-touch host setup
+
+From `qa_bug_session/tools`:
+
+```bash
+dart run setup_bug_session.dart --project-dir /path/to/app --force \
+  --git-ref v1.3.0 \
+  --notion-data-source-id '<NOTION_DATA_SOURCE_ID>' \
+  --notion-qa-user-id '<QA_NOTION_USER_ID>' \
+  --notion-product 'Product A'
+```
+
+Generates under `lib/bug_session/`:
+
+- `notion_ready_to_test_defaults.dart` — non-secret ids
+- `notion_ready_to_test_storage.dart` — `flutter_secure_storage` for token
+- `notion_ready_to_test_host.dart` — `wrapReadyToTestTools` in `MaterialApp.builder`
+
+Re-run setup with `--force` to refresh generated files.
+
 ## Scope
 
 - **Read:** data-source query (filtered), page properties, block tree.

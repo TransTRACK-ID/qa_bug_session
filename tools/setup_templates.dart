@@ -1,10 +1,12 @@
 // @dart=3.12
+import 'setup_notion_templates.dart';
 import 'setup_scan.dart';
 
 Map<String, String> generateBugSessionFiles({
   required String packageName,
   required String packageLibPath,
   required BugSessionProjectScan scan,
+  required NotionSetupOptions notionSetup,
 }) {
   final p = packageName;
   final lp = packageLibPath;
@@ -21,7 +23,7 @@ Map<String, String> generateBugSessionFiles({
   final storage = _storageTemplate(p, lp, scan.accessTokenKey);
   final navigation = _navigationTemplate(p, lp, routeMap, scan.router.kind);
 
-  return {
+  final files = <String, String>{
     'bug_session_gate.dart': '''
 import 'package:flutter_flavor/flutter_flavor.dart';
 
@@ -122,6 +124,16 @@ void registerBugSessionKit(BugSessionKit kit) {
     'bs_recorder_button.dart': _bsRecorderButtonTemplate(),
     'bug_session_kit.dart': _kitTemplate(p, lp, gate, env, cred, picker, share, nav, hooks),
   };
+
+  files.addAll(
+    generateNotionReadyToTestFiles(
+      packageName: packageName,
+      packageLibPath: packageLibPath,
+      notion: notionSetup,
+    ),
+  );
+
+  return files;
 }
 
 String _routeMapLiteral(List<BugSessionRouteEntry> routes) {
@@ -464,6 +476,7 @@ $picker
 $share
 $nav
 $hooks
+import 'notion_ready_to_test_host.dart';
 
 import 'bug_session_kit_holder.dart';
 
@@ -526,9 +539,11 @@ TransitionBuilder? bugSessionMaterialAppBuilder() {
     return null;
   }
   return bugSessionKit.wrapMaterialAppBuilder(
-    (context, child) => wrapBugSessionDefaultVideoHost(
-      child ?? const SizedBox.shrink(),
-      enabled: isBugSessionToolsEnabled,
+    (context, child) => wrapReadyToTestTools(
+      child: wrapBugSessionDefaultVideoHost(
+        child ?? const SizedBox.shrink(),
+        enabled: isBugSessionToolsEnabled,
+      ),
     ),
   );
 }

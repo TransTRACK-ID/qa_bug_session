@@ -7,6 +7,7 @@
 //
 import 'dart:io';
 
+import 'setup_notion_templates.dart';
 import 'setup_patch.dart';
 import 'setup_scan.dart';
 import 'setup_templates.dart';
@@ -81,6 +82,7 @@ void main(List<String> args) async {
     packageName: packageName,
     packageLibPath: packageLibPath,
     scan: scan,
+    notionSetup: options.notionSetup,
   );
 
   for (final entry in files.entries) {
@@ -143,6 +145,8 @@ void main(List<String> args) async {
   }
 
   print('');
+  print('');
+  print('Ready to Test: paste Notion token in-app (FAB) if not pre-configured.');
   print('BugSession setup complete. Run your dev/staging main: ${scan.mainFile}');
 }
 
@@ -298,6 +302,7 @@ class _Options {
     required this.routerDir,
     required this.force,
     required this.toolsDir,
+    required this.notionSetup,
   });
 
   final String projectDir;
@@ -309,6 +314,7 @@ class _Options {
   final String? routerDir;
   final bool force;
   final String toolsDir;
+  final NotionSetupOptions notionSetup;
 }
 
 _Options _parseArgs(List<String> args) {
@@ -317,9 +323,12 @@ _Options _parseArgs(List<String> args) {
   var registryOutput = 'lib/generated/bug_session_recorder_registry.g.dart';
   String? packageName;
   var gitUrl = 'https://github.com/TransTRACK-ID/qa_bug_session.git';
-  var gitRef = 'v1.1.0';
+  var gitRef = 'v1.3.0';
   String? routerDir;
   var force = false;
+  var notionDataSourceId = '';
+  var notionQaUserId = '';
+  String? notionProductDomain;
 
   final scriptPath = Platform.script.toFilePath();
   var toolsDir = File(scriptPath).parent.path;
@@ -344,6 +353,12 @@ _Options _parseArgs(List<String> args) {
         force = true;
       case '--tools-dir':
         toolsDir = args[++i];
+      case '--notion-data-source-id':
+        notionDataSourceId = args[++i];
+      case '--notion-qa-user-id':
+        notionQaUserId = args[++i];
+      case '--notion-product':
+        notionProductDomain = args[++i];
       case '--help':
         print(_help);
         exit(0);
@@ -360,6 +375,11 @@ _Options _parseArgs(List<String> args) {
     routerDir: routerDir,
     force: force,
     toolsDir: toolsDir,
+    notionSetup: NotionSetupOptions(
+      dataSourceId: notionDataSourceId,
+      qaUserId: notionQaUserId,
+      productDomain: notionProductDomain,
+    ),
   );
 }
 
@@ -377,15 +397,18 @@ String _packageLibPath(String outputDir) {
 }
 
 const _help = '''
-setup_bug_session.dart — zero-touch BugSession host integration
+setup_bug_session.dart — zero-touch BugSession + Ready to Test host integration
 
   --project-dir PATH     Flutter app root (default: cwd)
   --router-dir PATH      Retry: directory with GoRoute definitions
-  --git-ref REF          qa_bug_session tag (default: v1.1.0)
+  --git-ref REF          qa_bug_session tag (default: v1.3.0)
+  --notion-data-source-id ID   Baked into generated Notion defaults
+  --notion-qa-user-id ID       QA people-property user id
+  --notion-product NAME        Optional product domain filter
   --force                Overwrite generated lib/bug_session/*
   --help
 
-Always: registry codegen, package video capture, patch main/app/router/dio.
+Always: registry codegen, Ready to Test overlay, patch main/app/router/dio.
 Gate: dev / development / staging flavors only.
 Main: main_development.dart → main_staging.dart → main.dart
 ''';
@@ -414,6 +437,8 @@ void _mergePubspecDependencies(
     content = _insertIntoDependencies(content, block);
   } else if (content.contains('ref: v1.0.0')) {
     content = content.replaceAll('ref: v1.0.0', 'ref: $gitRef');
+  } else if (content.contains('ref: v1.1.0') && gitRef != 'v1.1.0') {
+    content = content.replaceAll('ref: v1.1.0', 'ref: $gitRef');
   }
 
   final deps = <String, String>{

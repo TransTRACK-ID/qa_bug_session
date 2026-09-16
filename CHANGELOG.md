@@ -2,6 +2,11 @@
 
 All notable changes are documented here. **1.0.0** is the first stable release; prior `0.x` tags on GitHub were pre-release iteration and are no longer maintained.
 
+## 1.3.0
+
+- **Ready to Test zero-touch setup:** `setup_bug_session.dart` generates Notion defaults, secure storage, and in-app FAB overlay; flags `--notion-data-source-id`, `--notion-qa-user-id`, `--notion-product`.
+- **Package UI:** `ReadyToTestToolsHost` (queue, detail, checklist submit to Notion).
+
 ## 1.2.0
 
 - **Ready to Test (Notion):** Dart client (`NotionClient`, `ReadyToTestService`, `NotionTaskStatusService`) for filtered list, read-only task detail, and to-do checkbox sync.

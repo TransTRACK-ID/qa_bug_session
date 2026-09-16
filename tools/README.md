@@ -27,7 +27,20 @@ The script:
 
 Gate: **`dev`**, **`development`**, **`staging`** flavors only.
 
-Requires **`qa_bug_session` v1.1.0+** (git ref in pubspec).
+Requires **`qa_bug_session` v1.3.0+** (git ref in pubspec).
+
+### Ready to Test (Notion)
+
+Setup always wires the **Ready to Test** FAB (dev/staging). Pass Notion ids once:
+
+```bash
+dart run setup_bug_session.dart --project-dir /path/to/app \
+  --notion-data-source-id 'c2046e5d-...' \
+  --notion-qa-user-id '223d872b-...' \
+  --notion-product 'Product A'
+```
+
+QA still enters the integration **token** in-app (secure storage). See [docs/NOTION_READY_TO_TEST.md](../docs/NOTION_READY_TO_TEST.md).
 
 ---
 
