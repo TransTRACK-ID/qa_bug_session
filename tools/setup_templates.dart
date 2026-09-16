@@ -20,7 +20,13 @@ Map<String, String> generateBugSessionFiles({
   final hooks = "import 'package:$p/$lp/bug_session_error_hooks.dart';";
 
   final routeMap = _routeMapLiteral(scan.router.routes);
-  final storage = _storageTemplate(p, lp, scan.accessTokenKey);
+  final storage = _storageTemplate(
+    p,
+    lp,
+    accessTokenKey: scan.accessTokenKey,
+    userIdKey: scan.userIdKey,
+    profileNameKey: scan.profileNameKey,
+  );
   final navigation = _navigationTemplate(p, lp, routeMap, scan.router.kind);
 
   final files = <String, String>{
@@ -34,7 +40,12 @@ bool isBugSessionToolsEnabled() {
 }
 ''',
     'bug_session_storage.dart': storage,
-    'bug_session_credential_injector.dart': _credentialTemplate(p, lp, scan.accessTokenKey),
+    'bug_session_credential_injector.dart': _credentialTemplate(
+      p,
+      lp,
+      accessTokenKey: scan.accessTokenKey,
+      userIdKey: scan.userIdKey,
+    ),
     'bug_session_file_picker.dart': _filePickerTemplate(),
     'bug_session_share.dart': _shareTemplate(),
     'bug_session_environment.dart': _environmentTemplate(gate, storage.split('\n').first),
@@ -146,8 +157,37 @@ String _routeMapLiteral(List<BugSessionRouteEntry> routes) {
 
 String _escape(String s) => s.replaceAll(r"'", r"\'");
 
-String _storageTemplate(String p, String lp, String? tokenKey) {
-  if (tokenKey == 'kAccessToken') {
+String _storageTemplate(
+  String p,
+  String lp, {
+  String? accessTokenKey,
+  String? userIdKey,
+  String? profileNameKey,
+}) {
+  if (accessTokenKey == 'kAccessToken' && userIdKey == 'kUserId') {
+    final displayHintRead = profileNameKey == 'kKeyProfileName'
+        ? '''
+  static Future<String?> readDisplayHint() async =>
+      sharedPrefs.getString(kKeyProfileName);
+'''
+        : '''
+  static Future<String?> readDisplayHint() async => null;
+''';
+    final displayHintWrite = profileNameKey == 'kKeyProfileName'
+        ? '''
+  static Future<void> writeDisplayHint(String value) async {
+    await sharedPrefs.setString(kKeyProfileName, value);
+  }
+
+  static Future<void> clearDisplayHint() async {
+    await sharedPrefs.remove(kKeyProfileName);
+  }
+'''
+        : '''
+  static Future<void> writeDisplayHint(String value) async {}
+
+  static Future<void> clearDisplayHint() async {}
+''';
     return '''
 import 'package:$p/utils/constants.dart';
 import 'package:$p/utils/get_it.dart';
@@ -156,12 +196,40 @@ abstract final class BugSessionStorage {
   static Future<String?> readAccessToken() =>
       secureStorage.read(key: kAccessToken);
 
+  static Future<String?> readUserId() => secureStorage.read(key: kUserId);
+$displayHintRead
+  static Future<void> writeAccessToken(String value) =>
+      secureStorage.write(key: kAccessToken, value: value);
+
+  static Future<void> writeUserId(String value) =>
+      secureStorage.write(key: kUserId, value: value);
+$displayHintWrite
+}
+''';
+  }
+  if (accessTokenKey == 'kAccessToken') {
+    return '''
+import 'package:get_it/get_it.dart';
+import 'package:$p/repositories/user_repository.dart';
+import 'package:$p/utils/constants.dart';
+import 'package:$p/utils/get_it.dart';
+
+abstract final class BugSessionStorage {
+  static Future<String?> readAccessToken() =>
+      secureStorage.read(key: kAccessToken);
+
   static Future<String?> readUserId() async {
+    if (!GetIt.I.isRegistered<UserRepository>()) {
+      return null;
+    }
     final profile = userHelper.getUserProfile();
     return profile?.id ?? profile?.email;
   }
 
   static Future<String?> readDisplayHint() async {
+    if (!GetIt.I.isRegistered<UserRepository>()) {
+      return null;
+    }
     final profile = userHelper.getUserProfile();
     return profile?.name ?? profile?.email;
   }
@@ -196,9 +264,85 @@ abstract final class BugSessionStorage {
 ''';
 }
 
-String _credentialTemplate(String p, String lp, String? tokenKey) {
-  if (tokenKey == 'kAccessToken') {
+String _credentialTemplate(
+  String p,
+  String lp, {
+  String? accessTokenKey,
+  String? userIdKey,
+}) {
+  if (accessTokenKey == 'kAccessToken' && userIdKey == 'kUserId') {
     return '''
+import 'package:$p/utils/constants.dart';
+import 'package:$p/utils/get_it.dart';
+import 'package:qa_bug_session/qa_bug_session.dart';
+
+class BugSessionCredentialInjector implements CredentialInjector {
+  Map<String, String>? _snapshot;
+
+  @override
+  Future<void> inject(
+    BugSessionCredential credential, {
+    BugSessionUser? user,
+  }) async {
+    _snapshot = {
+      kAccessToken: await secureStorage.read(key: kAccessToken) ?? '',
+      kUserId: await secureStorage.read(key: kUserId) ?? '',
+      kKeyProfileName: sharedPrefs.getString(kKeyProfileName) ?? '',
+    };
+    await secureStorage.write(
+      key: kAccessToken,
+      value: credential.accessToken,
+    );
+    final replayUserId = user?.userId.isNotEmpty == true
+        ? user!.userId
+        : credential.refreshToken;
+    if (replayUserId != null && replayUserId.isNotEmpty) {
+      await secureStorage.write(key: kUserId, value: replayUserId);
+    }
+    final profileName = user?.displayHint ??
+        user?.profileData?['profileName'] as String?;
+    if (profileName != null && profileName.isNotEmpty) {
+      await sharedPrefs.setString(kKeyProfileName, profileName);
+    }
+  }
+
+  @override
+  Future<String> resolveUserId() async {
+    return await secureStorage.read(key: kUserId) ?? '';
+  }
+
+  @override
+  Future<bool> tryRefresh(BugSessionCredential credential) async => false;
+
+  @override
+  Future<void> restorePreviousSession() async {
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      return;
+    }
+    await secureStorage.write(
+      key: kAccessToken,
+      value: snapshot[kAccessToken] ?? '',
+    );
+    await secureStorage.write(
+      key: kUserId,
+      value: snapshot[kUserId] ?? '',
+    );
+    final profileName = snapshot[kKeyProfileName] ?? '';
+    if (profileName.isEmpty) {
+      await sharedPrefs.remove(kKeyProfileName);
+    } else {
+      await sharedPrefs.setString(kKeyProfileName, profileName);
+    }
+    _snapshot = null;
+  }
+}
+''';
+  }
+  if (accessTokenKey == 'kAccessToken') {
+    return '''
+import 'package:get_it/get_it.dart';
+import 'package:$p/repositories/user_repository.dart';
 import 'package:$p/utils/constants.dart';
 import 'package:$p/utils/get_it.dart';
 import 'package:qa_bug_session/qa_bug_session.dart';
@@ -220,6 +364,9 @@ class BugSessionCredentialInjector implements CredentialInjector {
 
   @override
   Future<String> resolveUserId() async {
+    if (!GetIt.I.isRegistered<UserRepository>()) {
+      return '';
+    }
     final profile = userHelper.getUserProfile();
     return profile?.id ?? profile?.email ?? '';
   }

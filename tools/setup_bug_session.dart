@@ -323,7 +323,7 @@ _Options _parseArgs(List<String> args) {
   var registryOutput = 'lib/generated/bug_session_recorder_registry.g.dart';
   String? packageName;
   var gitUrl = 'https://github.com/TransTRACK-ID/qa_bug_session.git';
-  var gitRef = 'v1.3.0';
+  var gitRef = 'v1.3.1';
   String? routerDir;
   var force = false;
   var notionDataSourceId = '';
@@ -439,6 +439,8 @@ void _mergePubspecDependencies(
     content = content.replaceAll('ref: v1.0.0', 'ref: $gitRef');
   } else if (content.contains('ref: v1.1.0') && gitRef != 'v1.1.0') {
     content = content.replaceAll('ref: v1.1.0', 'ref: $gitRef');
+  } else if (content.contains('ref: v1.2.0') && gitRef != 'v1.2.0') {
+    content = content.replaceAll('ref: v1.2.0', 'ref: $gitRef');
   }
 
   final deps = <String, String>{

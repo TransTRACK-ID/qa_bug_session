@@ -2,6 +2,10 @@
 
 All notable changes are documented here. **1.0.0** is the first stable release; prior `0.x` tags on GitHub were pre-release iteration and are no longer maintained.
 
+## 1.3.1
+
+- **Setup:** `BugSessionStorage` no longer calls `userRepository` before GetIt registration (maritime-style apps); detects `kUserId` / `kKeyProfileName` for secure-storage hosts; auto_route scan from `@AutoRouterConfig`; pubspec bump from `v1.2.0`.
+
 ## 1.3.0
 
 - **Ready to Test zero-touch setup:** `setup_bug_session.dart` generates Notion defaults, secure storage, and in-app FAB overlay; flags `--notion-data-source-id`, `--notion-qa-user-id`, `--notion-product`.

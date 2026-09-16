@@ -34,6 +34,8 @@ class BugSessionProjectScan {
     required this.appFile,
     required this.router,
     required this.accessTokenKey,
+    required this.userIdKey,
+    required this.profileNameKey,
     required this.dioSetupFile,
     required this.hasDesignSystem,
   });
@@ -42,6 +44,10 @@ class BugSessionProjectScan {
   final String appFile;
   final BugSessionRouterScan router;
   final String? accessTokenKey;
+  /// e.g. kUserId when auth ids live in secure storage (not only ObjectBox).
+  final String? userIdKey;
+  /// e.g. kKeyProfileName for display hint in SharedPreferences.
+  final String? profileNameKey;
   final String? dioSetupFile;
   final bool hasDesignSystem;
 }
@@ -132,8 +138,22 @@ BugSessionRouterScan scanRouter({
     }
     if (rel.endsWith('.gr.dart') && content.contains('Route(')) {
       final routes = _extractAutoRouteNames(content);
-      if (routes.isNotEmpty) {
-        return BugSessionRouterScan(
+      if (routes.isNotEmpty &&
+          (best == null || routes.length > best.routes.length)) {
+        best = BugSessionRouterScan(
+          kind: BugSessionRouterKind.autoRoute,
+          routes: routes,
+          sourceFile: rel,
+          routerDirUsed: routerDir,
+        );
+      }
+    }
+    if (content.contains('@AutoRouterConfig') ||
+        content.contains('extends RootStackRouter')) {
+      final routes = _extractAutoRoutesFromRouterConfig(content);
+      if (routes.isNotEmpty &&
+          (best == null || routes.length > best.routes.length)) {
+        best = BugSessionRouterScan(
           kind: BugSessionRouterKind.autoRoute,
           routes: routes,
           sourceFile: rel,
@@ -197,6 +217,22 @@ List<BugSessionRouteEntry> _extractAutoRouteNames(String content) {
   return routes;
 }
 
+List<BugSessionRouteEntry> _extractAutoRoutesFromRouterConfig(String content) {
+  final routes = <BugSessionRouteEntry>[];
+  for (final match
+      in RegExp(r'page:\s*(\w+Route)\.page').allMatches(content)) {
+    final routeClass = match.group(1)!;
+    routes.add(
+      BugSessionRouteEntry(name: routeClass, path: '/$routeClass'),
+    );
+  }
+  final unique = <String, BugSessionRouteEntry>{};
+  for (final r in routes) {
+    unique[r.name] = r;
+  }
+  return unique.values.toList()..sort((a, b) => a.name.compareTo(b.name));
+}
+
 String? _firstQuotedAfter(String chunk, String key) {
   final match = RegExp('$key\\s*:\\s*\'([^\']*)\'').firstMatch(chunk);
   return match?.group(1);
@@ -211,6 +247,28 @@ String? scanAccessTokenKey(String projectDir) {
     }
     if (content.contains('kAccessToken')) {
       return 'kAccessToken';
+    }
+  }
+  return null;
+}
+
+String? scanUserIdKey(String projectDir) {
+  for (final file in _dartFilesUnder(Directory('$projectDir/lib'))) {
+    final content = file.readAsStringSync();
+    if (RegExp(r'const\s+kUserId\s*=').hasMatch(content) ||
+        content.contains('key: kUserId')) {
+      return 'kUserId';
+    }
+  }
+  return null;
+}
+
+String? scanProfileNameKey(String projectDir) {
+  for (final file in _dartFilesUnder(Directory('$projectDir/lib'))) {
+    final content = file.readAsStringSync();
+    if (RegExp(r'const\s+kKeyProfileName\s*=').hasMatch(content) ||
+        content.contains('kKeyProfileName')) {
+      return 'kKeyProfileName';
     }
   }
   return null;
@@ -264,6 +322,8 @@ BugSessionProjectScan scanProject({
     appFile: app,
     router: router,
     accessTokenKey: scanAccessTokenKey(projectDir),
+    userIdKey: scanUserIdKey(projectDir),
+    profileNameKey: scanProfileNameKey(projectDir),
     dioSetupFile: scanDioSetupFile(projectDir),
     hasDesignSystem: pubspecHasDesignSystem(pubspecContent),
   );
