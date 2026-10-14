@@ -7,6 +7,7 @@ import '../recording/semantic_interaction_recorder.dart';
 import '../runtime/bug_session_environment.dart';
 import '../security/credential_injector.dart';
 import '../security/session_lock_validator.dart';
+import 'bug_session_replay_action_filter.dart';
 import 'replay_failure.dart';
 import 'replay_result.dart';
 
@@ -27,6 +28,9 @@ class BugSessionReplayer {
     this.restoreSessionAfterReplay = false,
     this.replayBootstrap,
     this.prepareForReplay,
+    this.prepareRecordedActionsForReplay,
+    this.replayActionFilterOptions =
+        const BugSessionReplayActionFilterOptions(),
   })  : interactionRecorder =
             interactionRecorder ?? SemanticInteractionRecorder(),
         replayNetworkRecorder =
@@ -43,6 +47,11 @@ class BugSessionReplayer {
   final bool restoreSessionAfterReplay;
   final Future<void> Function(BugSession session)? replayBootstrap;
   final Future<void> Function(BugSession session)? prepareForReplay;
+  final List<RecordedAction> Function(
+    BugSession session,
+    List<RecordedAction> actions,
+  )? prepareRecordedActionsForReplay;
+  final BugSessionReplayActionFilterOptions replayActionFilterOptions;
 
   List<CompatibilityWarning> compatibilityWarnings(
     BugSession session,
@@ -147,12 +156,22 @@ class BugSessionReplayer {
       );
     }
 
+    final actions = prepareRecordedActionsForReplay?.call(
+          session,
+          session.actions,
+        ) ??
+        bugSessionPrepareActionsForReplay(
+          session.actions,
+          session: session,
+          options: replayActionFilterOptions,
+        );
+
     var succeeded = 0;
     ReplayFailure? failure;
     var cancelled = false;
     try {
       succeeded = await interactionRecorder.replay(
-        RecordedActions(actions: session.actions),
+        RecordedActions(actions: actions),
         targetTimeout: targetTimeout,
         shouldStop: shouldStop,
         onActionFailed: (action, error) {
@@ -164,12 +183,12 @@ class BugSessionReplayer {
         },
       );
       cancelled = shouldStop?.call() == true &&
-          succeeded < session.actions.length &&
+          succeeded < actions.length &&
           failure == null;
     } catch (e) {
       failure ??= ReplayFailure(
         actionIndex: succeeded,
-        action: session.actions[succeeded],
+        action: actions[succeeded],
         reason: e.toString(),
       );
     } finally {
@@ -181,7 +200,7 @@ class BugSessionReplayer {
 
     if (failure != null) {
       return ReplayResult(
-        actionsAttempted: session.actions.length,
+        actionsAttempted: actions.length,
         actionsSucceeded: succeeded,
         replayNetworkEvents: replayNetworkRecorder.getEvents(),
         failure: failure,
@@ -190,7 +209,7 @@ class BugSessionReplayer {
 
     if (cancelled) {
       return ReplayResult(
-        actionsAttempted: session.actions.length,
+        actionsAttempted: actions.length,
         actionsSucceeded: succeeded,
         replayNetworkEvents: replayNetworkRecorder.getEvents(),
         cancelled: true,
@@ -203,7 +222,7 @@ class BugSessionReplayer {
     );
 
     return ReplayResult(
-      actionsAttempted: session.actions.length,
+      actionsAttempted: actions.length,
       actionsSucceeded: succeeded,
       replayNetworkEvents: replayNetworkRecorder.getEvents(),
       comparison: comparison,

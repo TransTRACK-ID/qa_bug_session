@@ -7,8 +7,12 @@ import '../kit/bug_session_theme.dart';
 import '../recording/bug_session_recorder.dart';
 import '../replay/bug_session_replay_controller.dart';
 import 'bug_session_capture_mode.dart';
+import 'bug_session_chrome_scope.dart';
 
 /// Top-right status: Shadowplay buffer, manual record, or replay.
+///
+/// During replay, the badge is tappable and calls
+/// [BugSessionReplayController.requestStop].
 class RecordingOverlay extends StatelessWidget {
   const RecordingOverlay({
     super.key,
@@ -65,11 +69,13 @@ class RecordingOverlay extends StatelessWidget {
             Positioned(
               top: MediaQuery.paddingOf(context).top + 10,
               right: 12,
-              child: _RecordingStatusBadge(
-                recorder: kit.recorder,
-                replayController: kit.replayController,
-                label: label,
-                replayActive: kit.replayController.active,
+              child: BugSessionChromeScope(
+                child: _RecordingStatusBadge(
+                  recorder: kit.recorder,
+                  replayController: kit.replayController,
+                  label: label,
+                  replayActive: kit.replayController.active,
+                ),
               ),
             ),
           ],
@@ -145,7 +151,7 @@ class _RecordingStatusBadgeState extends State<_RecordingStatusBadge>
         ? const Color(0xFF64D2FF)
         : const Color(0xFFFF453A);
 
-    return DecoratedBox(
+    final badge = DecoratedBox(
       decoration: BoxDecoration(
         color: const Color(0xF0121214),
         borderRadius: BorderRadius.circular(10),
@@ -186,6 +192,14 @@ class _RecordingStatusBadgeState extends State<_RecordingStatusBadge>
                 letterSpacing: 1.1,
               ),
             ),
+            if (widget.replayActive) ...[
+              const SizedBox(width: 6),
+              const Icon(
+                Icons.stop_rounded,
+                color: Color(0xB3F2F2F7),
+                size: 14,
+              ),
+            ],
             if (clock.isNotEmpty) ...[
               const SizedBox(width: 8),
               Text(
@@ -200,6 +214,19 @@ class _RecordingStatusBadgeState extends State<_RecordingStatusBadge>
             ],
           ],
         ),
+      ),
+    );
+
+    if (!widget.replayActive) {
+      return badge;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: widget.replayController.requestStop,
+        borderRadius: BorderRadius.circular(10),
+        child: badge,
       ),
     );
   }

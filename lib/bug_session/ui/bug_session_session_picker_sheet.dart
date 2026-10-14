@@ -31,6 +31,7 @@ class BugSessionSessionPickerSheet extends StatelessWidget {
       );
       await showModalBottomSheet<void>(
         context: modalContext,
+        useRootNavigator: true,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
         builder: (ctx) => BugSessionSessionPickerSheet(

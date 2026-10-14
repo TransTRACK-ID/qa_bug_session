@@ -3,6 +3,9 @@ import 'package:flutter/widgets.dart';
 
 import 'bug_session_chrome_hit_test.dart';
 
+/// Synthetic pointer id for replay taps (not used by real touch input).
+const int kBugSessionReplayPointerId = 24;
+
 /// Dispatches synthetic pointer events at [globalPosition] (replay taps).
 Future<void> replayCoordinateTap(
   Offset globalPosition, {
@@ -12,7 +15,7 @@ Future<void> replayCoordinateTap(
     return;
   }
   final binding = WidgetsBinding.instance;
-  const pointer = 24;
+  const pointer = kBugSessionReplayPointerId;
   binding.handlePointerEvent(
     PointerDownEvent(pointer: pointer, position: globalPosition),
   );

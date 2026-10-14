@@ -19,6 +19,10 @@ import '../ui/bug_session_control_panel_layout.dart';
 import '../ui/bug_session_overlay.dart';
 import '../ui/bug_session_sheet_coordinator.dart';
 import '../ui/bug_session_tap_ripple_notifier.dart';
+import '../qa_testing/qa_testing_chrome.dart';
+import '../qa_testing/qa_testing_notification.dart';
+import '../qa_testing/qa_testing_session.dart';
+import 'bug_session_background_work.dart';
 import 'bug_session_config.dart';
 import 'bug_session_dio_interceptor.dart';
 import 'bug_session_scope.dart';
@@ -34,7 +38,11 @@ class BugSessionKit {
         controlPanelLayout = BugSessionControlPanelLayout(),
         captureMode = BugSessionCaptureMode(),
         replayController = BugSessionReplayController(),
-        sheetCoordinator = BugSessionSheetCoordinator();
+        sheetCoordinator = BugSessionSheetCoordinator(),
+        qaTestingChrome = QaTestingChromeController(),
+        backgroundWork = BugSessionBackgroundWorkController() {
+    qaTesting = QaTestingSessionController(this);
+  }
 
   final BugSessionConfig config;
   final BugSessionRecorder recorder;
@@ -46,6 +54,9 @@ class BugSessionKit {
   final BugSessionCaptureMode captureMode;
   final BugSessionReplayController replayController;
   final BugSessionSheetCoordinator sheetCoordinator;
+  late final QaTestingSessionController qaTesting;
+  final QaTestingChromeController qaTestingChrome;
+  final BugSessionBackgroundWorkController backgroundWork;
 
   /// Prepares catalog storage. Call from `main()` before `runApp` when using
   /// the default documents directory (no [BugSessionConfig.storageDirectory]).
@@ -63,7 +74,10 @@ class BugSessionKit {
         videoCapture: _videoVisualCaptureFromConfig(config),
         shadowplaySettings: config.shadowplay,
       ),
-      catalog: FileBugSessionCatalog(store: BugSessionStore(root)),
+      catalog: FileBugSessionCatalog(
+        store: BugSessionStore(root),
+        includeVideoInSessionZip: config.includeVideoInSessionZip,
+      ),
       replayer: BugSessionReplayer(
         credentialInjector: config.credentialInjector,
         interactionRecorder: SemanticInteractionRecorder(
@@ -71,6 +85,7 @@ class BugSessionKit {
           replayStepDelay: config.replayStepDelay,
           replaySettle: config.replaySettle,
           tryReplayAction: config.tryReplayAction,
+          tryReplayTextInput: config.tryReplayTextInput,
           resolveReplayTapPosition: config.resolveReplayTapPosition,
           resolveRecorderTargetId: config.resolveRecorderTargetId,
         ),
@@ -78,8 +93,10 @@ class BugSessionKit {
         restoreSessionAfterReplay: config.restoreSessionAfterReplay,
         replayBootstrap: config.replayBootstrap,
         prepareForReplay: config.prepareForReplay,
+        prepareRecordedActionsForReplay: config.prepareRecordedActionsForReplay,
       ),
     );
+    await QaTestingNotification.initialize();
     if (config.enabled) {
       await kit.catalog.listEntries();
       await kit.catalog.restoreRecorderLastSession(kit.recorder);
@@ -104,7 +121,10 @@ class BugSessionKit {
         videoCapture: _videoVisualCaptureFromConfig(config),
         shadowplaySettings: config.shadowplay,
       ),
-      catalog: FileBugSessionCatalog(store: BugSessionStore(root!)),
+      catalog: FileBugSessionCatalog(
+        store: BugSessionStore(root!),
+        includeVideoInSessionZip: config.includeVideoInSessionZip,
+      ),
       replayer: BugSessionReplayer(
         credentialInjector: config.credentialInjector,
         interactionRecorder: SemanticInteractionRecorder(
@@ -112,6 +132,7 @@ class BugSessionKit {
           replayStepDelay: config.replayStepDelay,
           replaySettle: config.replaySettle,
           tryReplayAction: config.tryReplayAction,
+          tryReplayTextInput: config.tryReplayTextInput,
           resolveReplayTapPosition: config.resolveReplayTapPosition,
           resolveRecorderTargetId: config.resolveRecorderTargetId,
         ),
@@ -119,6 +140,7 @@ class BugSessionKit {
         restoreSessionAfterReplay: config.restoreSessionAfterReplay,
         replayBootstrap: config.replayBootstrap,
         prepareForReplay: config.prepareForReplay,
+        prepareRecordedActionsForReplay: config.prepareRecordedActionsForReplay,
       ),
     );
     if (config.enabled && config.shadowplay.enabled) {

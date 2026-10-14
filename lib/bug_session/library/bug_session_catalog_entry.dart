@@ -1,5 +1,7 @@
 import 'package:meta/meta.dart';
 
+import 'bug_session_recording_kind.dart';
+
 enum BugSessionCatalogSource {
   recorded,
   exported,
@@ -22,6 +24,8 @@ class BugSessionCatalogEntry {
     this.environment,
     this.userDisplayHint,
     this.videoSidecarPath,
+    this.jamShareUrl,
+    this.recordingKind,
   });
 
   final String sessionId;
@@ -29,6 +33,7 @@ class BugSessionCatalogEntry {
   final BugSessionCatalogSource source;
   final String? filePath;
   final String? videoSidecarPath;
+  final String? jamShareUrl;
   final DateTime startedAt;
   final DateTime? stoppedAt;
   final int actionCount;
@@ -36,6 +41,13 @@ class BugSessionCatalogEntry {
   final String buildNumber;
   final String? environment;
   final String? userDisplayHint;
+  final BugSessionRecordingKind? recordingKind;
+
+  /// User-facing capture label; legacy rows without kind show [savedSessionLabel].
+  String get recordingKindLabel =>
+      recordingKind?.label ?? savedSessionLabel;
+
+  static const savedSessionLabel = 'Saved session';
 
   Map<String, Object?> toJson() => {
         'sessionId': sessionId,
@@ -51,13 +63,18 @@ class BugSessionCatalogEntry {
         if (environment != null) 'environment': environment,
         if (userDisplayHint != null) 'userDisplayHint': userDisplayHint,
         if (videoSidecarPath != null) 'videoSidecarPath': videoSidecarPath,
+        if (jamShareUrl != null) 'jamShareUrl': jamShareUrl,
+        if (recordingKind != null) 'recordingKind': recordingKind!.name,
       };
 
   factory BugSessionCatalogEntry.fromJson(Map<String, Object?> json) {
+    final source =
+        BugSessionCatalogSource.values.byName(json['source'] as String);
+    final displayName = json['displayName'] as String;
     return BugSessionCatalogEntry(
       sessionId: json['sessionId'] as String,
-      displayName: json['displayName'] as String,
-      source: BugSessionCatalogSource.values.byName(json['source'] as String),
+      displayName: displayName,
+      source: source,
       filePath: json['filePath'] as String?,
       startedAt: DateTime.parse(json['startedAt'] as String),
       stoppedAt: json['stoppedAt'] != null
@@ -69,15 +86,25 @@ class BugSessionCatalogEntry {
       environment: json['environment'] as String?,
       userDisplayHint: json['userDisplayHint'] as String?,
       videoSidecarPath: json['videoSidecarPath'] as String?,
+      jamShareUrl: json['jamShareUrl'] as String?,
+      recordingKind: inferBugSessionRecordingKind(
+        displayName: displayName,
+        catalogSourceName: source.name,
+        recordingKindJson: json['recordingKind'] as String?,
+      ),
     );
   }
 
   BugSessionCatalogEntry copyWith({
     String? displayName,
     BugSessionCatalogSource? source,
+    BugSessionRecordingKind? recordingKind,
     String? filePath,
     String? videoSidecarPath,
+    String? jamShareUrl,
     bool clearFilePath = false,
+    bool clearVideoSidecarPath = false,
+    bool clearJamShareUrl = false,
   }) {
     return BugSessionCatalogEntry(
       sessionId: sessionId,
@@ -91,7 +118,12 @@ class BugSessionCatalogEntry {
       buildNumber: buildNumber,
       environment: environment,
       userDisplayHint: userDisplayHint,
-      videoSidecarPath: videoSidecarPath ?? this.videoSidecarPath,
+      videoSidecarPath: clearVideoSidecarPath
+          ? null
+          : (videoSidecarPath ?? this.videoSidecarPath),
+      jamShareUrl:
+          clearJamShareUrl ? null : (jamShareUrl ?? this.jamShareUrl),
+      recordingKind: recordingKind ?? this.recordingKind,
     );
   }
 }

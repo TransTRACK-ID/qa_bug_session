@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../kit/bug_session_background_work.dart';
 import '../kit/bug_session_kit.dart';
 import '../kit/bug_session_modal_context.dart';
 import '../library/bug_session_catalog_entry.dart';
@@ -48,6 +49,7 @@ class BugSessionSessionActions extends StatelessWidget {
     );
     return showModalBottomSheet<void>(
       context: modalContext,
+      useRootNavigator: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => BugSessionSessionActions(kit: kit, entry: entry),
     );
@@ -115,8 +117,32 @@ class BugSessionSessionActions extends StatelessWidget {
   }
 
   Future<void> _export(BuildContext context) async {
-    _snack(context, 'Preparing export (waiting for video if needed)…');
-    final updated = await kit.catalog.exportSessionToDisk(entry.sessionId);
+    if (kit.backgroundWork.active) {
+      return;
+    }
+    late BugSessionCatalogEntry updated;
+    try {
+      await kit.backgroundWork.run(
+        config: kit.config,
+        title: 'Exporting session',
+        startToast: 'Exporting session…',
+        successToast: 'Session exported',
+        errorToastPrefix: 'Export failed',
+        phases: [
+          BugSessionWorkPhase(
+            label: 'Writing zip',
+            weight: 1,
+            run: (r) async {
+              r(0);
+              updated = await kit.catalog.exportSessionToDisk(entry.sessionId);
+              r(1);
+            },
+          ),
+        ],
+      );
+    } catch (_) {
+      return;
+    }
     if (!context.mounted) {
       return;
     }
@@ -125,23 +151,24 @@ class BugSessionSessionActions extends StatelessWidget {
         kit.config.shareExport != null &&
         kit.config.openShareSheetAfterExport) {
       try {
-        await shareBugSessionCatalogEntry(config: kit.config, entry: updated);
-        _snack(context, 'Share sheet opened — pick WhatsApp or another app');
+        await shareBugSessionCatalogEntry(kit: kit, entry: updated);
+        BugSessionTaskToasts.notifySuccess(
+          kit.config,
+          'Share sheet opened — pick WhatsApp or another app',
+        );
       } catch (e) {
-        _snack(context, 'Export saved; share failed: $e');
+        BugSessionTaskToasts.notifyError(
+          kit.config,
+          'Export saved; share failed: $e',
+        );
       }
-    } else {
-      _snack(
-        context,
-        path != null ? 'Exported to app storage' : 'Exported to device storage',
-      );
     }
     _popDetail(context);
   }
 
   Future<void> _share(BuildContext context) async {
     try {
-      await shareBugSessionCatalogEntry(config: kit.config, entry: entry);
+      await shareBugSessionCatalogEntry(kit: kit, entry: entry);
     } catch (e) {
       if (context.mounted) {
         _snack(context, 'Share failed: $e');
@@ -209,6 +236,11 @@ class BugSessionSessionActions extends StatelessWidget {
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
               ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              entry.recordingKindLabel,
+              style: const TextStyle(color: Colors.white60, fontSize: 12),
             ),
             const SizedBox(height: 12),
             GlassButton(

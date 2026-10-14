@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
 
+import '../../jam/jam_dev_connection.dart';
 import '../../notion/notion_api.dart';
 import '../../notion/notion_ready_to_test.dart';
+import '../../notion/qa_notion_status_names.dart';
 import '../../notion/ready_to_test_connection.dart';
+import '../kit/bug_session_background_work.dart';
 import '../kit/bug_session_kit.dart';
+import '../notion_page_status_update.dart';
+import 'bug_session_flash.dart';
 import 'bug_session_sheet_stack.dart';
+import 'bug_session_todo_row.dart';
 import 'glass/glass_button.dart';
+import 'ready_to_test_json_import_dialog.dart';
+import '../../notion/ready_to_test_connection_import.dart';
 
 /// Ready to Test queue inside the BugSession glass bottom sheet (same stack as library).
 class BugSessionReadyToTestSheet {
@@ -104,9 +112,12 @@ class _ReadyToTestSettingsPaneState extends State<_ReadyToTestSettingsPane> {
   final _dataSourceId = TextEditingController();
   final _qaUserId = TextEditingController();
   final _product = TextEditingController();
+  final _jamToken = TextEditingController();
+  final _jamTeamId = TextEditingController();
   var _loading = true;
   var _saving = false;
   String? _error;
+  ReadyToTestConnectionImport? _jsonOverrides;
 
   ReadyToTestCredentialsStore get _store => widget.kit.config.readyToTestStore!;
   ReadyToTestSetupDefaults get _defaults =>
@@ -127,6 +138,10 @@ class _ReadyToTestSettingsPaneState extends State<_ReadyToTestSettingsPane> {
     _dataSourceId.text = existing?.dataSourceId ?? '';
     _qaUserId.text = existing?.qaUserId ?? '';
     _product.text = existing?.productDomain ?? '';
+    final jamStore = widget.kit.config.jamDevCredentialsStore;
+    final jam = await jamStore?.read();
+    _jamToken.text = jam?.personalAccessToken ?? '';
+    _jamTeamId.text = jam?.teamId ?? '';
     setState(() => _loading = false);
   }
 
@@ -136,6 +151,8 @@ class _ReadyToTestSettingsPaneState extends State<_ReadyToTestSettingsPane> {
     _dataSourceId.dispose();
     _qaUserId.dispose();
     _product.dispose();
+    _jamToken.dispose();
+    _jamTeamId.dispose();
     super.dispose();
   }
 
@@ -159,6 +176,18 @@ class _ReadyToTestSettingsPaneState extends State<_ReadyToTestSettingsPane> {
             style: TextStyle(color: Colors.white70, fontSize: 12),
           ),
           const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _importJson,
+              icon: const Icon(Icons.data_object, color: Colors.white70, size: 18),
+              label: const Text(
+                'Paste JSON to fill all fields',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           _field(_token, 'Integration token (secret)', obscure: true),
           const SizedBox(height: 10),
           _field(_dataSourceId, 'Data source ID'),
@@ -166,6 +195,20 @@ class _ReadyToTestSettingsPaneState extends State<_ReadyToTestSettingsPane> {
           _field(_qaUserId, 'QA user ID (people property)'),
           const SizedBox(height: 10),
           _field(_product, 'Product domain filter (optional)'),
+          const SizedBox(height: 16),
+          const Text(
+            'Jam.dev (video upload)',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Required for pass/issue flows that upload screen recordings to Jam.',
+            style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          _field(_jamToken, 'Jam personal access token', obscure: true),
+          const SizedBox(height: 10),
+          _field(_jamTeamId, 'Jam team ID'),
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(_error!, style: const TextStyle(color: Colors.redAccent)),
@@ -204,17 +247,47 @@ class _ReadyToTestSettingsPaneState extends State<_ReadyToTestSettingsPane> {
     );
   }
 
+  Future<void> _importJson() async {
+    final parsed = await showReadyToTestJsonImportDialog(
+      context: context,
+      kit: widget.kit,
+    );
+    if (parsed == null || !mounted) {
+      return;
+    }
+    _jsonOverrides = parsed;
+    void setIf(String? value, TextEditingController c) {
+      if (value != null && value.isNotEmpty) {
+        c.text = value;
+      }
+    }
+    setIf(parsed.notionToken, _token);
+    setIf(parsed.dataSourceId, _dataSourceId);
+    setIf(parsed.qaUserId, _qaUserId);
+    setIf(parsed.productDomain, _product);
+    setIf(parsed.jamPersonalAccessToken, _jamToken);
+    setIf(parsed.jamTeamId, _jamTeamId);
+    setState(() => _error = null);
+    BugSessionFlash.showTopFlash(
+      widget.kit.config,
+      message: 'Fields filled from JSON — tap Save & validate',
+    );
+  }
+
   Future<void> _save() async {
     final product = _product.text.trim();
+    final overrides = _jsonOverrides;
     final connection = ReadyToTestConnection(
       token: _token.text.trim(),
       dataSourceId: _dataSourceId.text.trim(),
       qaUserId: _qaUserId.text.trim(),
       productDomain: product.isEmpty ? null : product,
-      statusEquals: _defaults.statusEquals,
-      statusPropertyName: _defaults.statusPropertyName,
-      productPropertyName: _defaults.productPropertyName,
-      qaPropertyName: _defaults.qaPropertyName,
+      statusEquals: overrides?.statusEquals ?? _defaults.statusEquals,
+      statusPropertyName:
+          overrides?.statusPropertyName ?? _defaults.statusPropertyName,
+      productPropertyName:
+          overrides?.productPropertyName ?? _defaults.productPropertyName,
+      qaPropertyName: overrides?.qaPropertyName ?? _defaults.qaPropertyName,
     );
     if (!connection.isComplete) {
       setState(() {
@@ -231,6 +304,15 @@ class _ReadyToTestSettingsPaneState extends State<_ReadyToTestSettingsPane> {
       final client = NotionClient(connection.toApiConfig());
       await client.getUsersMe();
       await _store.write(connection);
+      final jamStore = widget.kit.config.jamDevCredentialsStore;
+      if (jamStore != null) {
+        await jamStore.write(
+          JamDevConnection(
+            personalAccessToken: _jamToken.text.trim(),
+            teamId: _jamTeamId.text.trim(),
+          ),
+        );
+      }
       if (!mounted) {
         return;
       }
@@ -455,6 +537,18 @@ class _ReadyToTestDetailPaneState extends State<_ReadyToTestDetailPane> {
     }
   }
 
+  String get _startTestingButtonLabel {
+    final status = _detail?.task.status ?? '';
+    if (_normalizeReadyToTestStatus(status) == 'ontesting') {
+      return 'Continue testing this card';
+    }
+    return 'Start testing this card';
+  }
+
+  static String _normalizeReadyToTestStatus(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'\s+'), '');
+  }
+
   Map<String, bool> _changedTodos() {
     final detail = _detail;
     if (detail == null) {
@@ -479,10 +573,30 @@ class _ReadyToTestDetailPaneState extends State<_ReadyToTestDetailPane> {
       return;
     }
 
+    if (widget.kit.backgroundWork.active) {
+      return;
+    }
     setState(() => _submitting = true);
     try {
-      final client = NotionClient(widget.connection.toApiConfig());
-      await ReadyToTestService(client).submitTodoChanges(changes);
+      await widget.kit.backgroundWork.run(
+        config: widget.kit.config,
+        title: 'Syncing checklist',
+        startToast: 'Syncing checklist to Notion…',
+        successToast: 'Checklist synced',
+        errorToastPrefix: 'Sync failed',
+        phases: [
+          BugSessionWorkPhase(
+            label: 'Submitting to Notion',
+            weight: 1,
+            run: (r) async {
+              r(0);
+              final client = NotionClient(widget.connection.toApiConfig());
+              await ReadyToTestService(client).submitTodoChanges(changes);
+              r(1);
+            },
+          ),
+        ],
+      );
       if (!mounted) {
         return;
       }
@@ -522,6 +636,26 @@ class _ReadyToTestDetailPaneState extends State<_ReadyToTestDetailPane> {
       children: [
         Expanded(child: _buildBody()),
         const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final status in QaNotionStatusNames.quickSetStatuses)
+              ActionChip(
+                label: Text(status, style: const TextStyle(fontSize: 11)),
+                onPressed: _submitting
+                    ? null
+                    : () => _setStatus(status),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        GlassButton(
+          theme: theme,
+          label: _startTestingButtonLabel,
+          onPressed: _submitting ? null : _startTesting,
+        ),
+        const SizedBox(height: 6),
         GlassButton(
           theme: theme,
           label: _submitting ? 'Submitting…' : 'Submit checklist to Notion',
@@ -529,6 +663,79 @@ class _ReadyToTestDetailPaneState extends State<_ReadyToTestDetailPane> {
         ),
       ],
     );
+  }
+
+  Future<void> _setStatus(String status) async {
+    if (widget.kit.backgroundWork.active) {
+      return;
+    }
+    setState(() => _submitting = true);
+    try {
+      await widget.kit.backgroundWork.run(
+        config: widget.kit.config,
+        title: 'Updating Notion status',
+        startToast: 'Updating status…',
+        successToast: 'Status → $status',
+        errorToastPrefix: 'Status update failed',
+        phases: [
+          BugSessionWorkPhase(
+            label: 'Updating status',
+            weight: 1,
+            run: (r) async {
+              r(0);
+              final client = NotionClient(widget.connection.toApiConfig());
+              await updateNotionPageStatusResolving(
+                kit: widget.kit,
+                client: client,
+                pageId: widget.pageId,
+                status: status,
+                statusPropertyOverride: widget.connection.statusPropertyName,
+                fallbackContext: context,
+              );
+              r(1);
+            },
+          ),
+        ],
+      );
+    } catch (_) {
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
+
+  Future<void> _startTesting() async {
+    final detail = _detail;
+    if (detail == null) {
+      return;
+    }
+    final continuing =
+        _normalizeReadyToTestStatus(detail.task.status) == 'ontesting';
+    final kit = widget.kit;
+    try {
+      await kit.qaTesting.startTesting(
+        connection: widget.connection,
+        pageId: widget.pageId,
+        title: widget.title,
+        todos: detail.todos,
+      );
+      // [startTesting] already closes the sheet via [dismissAll]; do not pop again.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        BugSessionFlash.showTopFlash(
+          kit.config,
+          message: continuing
+              ? 'Testing resumed · full recording'
+              : 'Testing started · full recording',
+        );
+      });
+    } catch (e) {
+      BugSessionFlash.showTopFlash(
+        kit.config,
+        message: '$e',
+        isError: true,
+      );
+    }
   }
 
   Widget _buildBody() {
@@ -578,14 +785,11 @@ class _ReadyToTestDetailPaneState extends State<_ReadyToTestDetailPane> {
                   ],
                 ),
               ),
-            NotionTodoBlock(:final blockId, :final text) => CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(text, style: const TextStyle(color: Colors.white)),
-                checkColor: Colors.black,
-                activeColor: Colors.white70,
-                value: _pending[blockId] ?? false,
+            NotionTodoBlock(:final blockId, :final text) => BugSessionTodoRow(
+                checked: _pending[blockId] ?? false,
+                text: text,
                 onChanged: (value) {
-                  setState(() => _pending[blockId] = value ?? false);
+                  setState(() => _pending[blockId] = value);
                 },
               ),
             _ => const SizedBox.shrink(),

@@ -18,6 +18,7 @@ class BugSessionVideoVisualCapture {
   BugSessionVideoArtifact? _artifact;
   Timer? _maxTimer;
   bool _halted = false;
+  bool _maxDurationLimitHeld = false;
 
   Future<void> start() async {
     await _beginRollingCapture(clearArtifact: true);
@@ -30,9 +31,32 @@ class BugSessionVideoVisualCapture {
     _halted = false;
     _maxTimer?.cancel();
     await _capture.start(maxDuration: _maxDuration);
-    _maxTimer = Timer(_maxDuration, () {
-      unawaited(stop());
-    });
+    if (!_maxDurationLimitHeld) {
+      _maxTimer = Timer(_maxDuration, () {
+        unawaited(stop());
+      });
+    }
+  }
+
+  /// QA card testing: do not stop capture after [maxDuration] (often 1 minute).
+  void holdMaxDurationLimit() {
+    _maxDurationLimitHeld = true;
+    _maxTimer?.cancel();
+    _maxTimer = null;
+  }
+
+  void releaseMaxDurationLimit() {
+    _maxDurationLimitHeld = false;
+  }
+
+  Future<void> waitForBufferedFrames({
+    int minimum = 1,
+    Duration timeout = const Duration(seconds: 6),
+  }) async {
+    await _deferrable?.waitForMinimumFrames(
+      minimum: minimum,
+      timeout: timeout,
+    );
   }
 
   /// Stops frame capture only (no encode). For fast Shadowplay save.
@@ -49,6 +73,21 @@ class BugSessionVideoVisualCapture {
   }
 
   /// Encodes after [haltCapture], returns archive bytes, then restarts capture.
+  /// Snapshot MP4 for QA issue upload, then resume rolling capture.
+  Future<BugSessionVideoArtifact?> snapshotAndResume() async {
+    await haltCapture();
+    final artifact = await _deferrable?.finalizeCapture();
+    _halted = false;
+    await _beginRollingCapture(clearArtifact: true);
+    return artifact;
+  }
+
+  /// Final MP4 when QA testing ends (no resume).
+  Future<BugSessionVideoArtifact?> finalizeWithoutResume() async {
+    await haltCapture();
+    return _deferrable?.finalizeCapture();
+  }
+
   Future<Map<String, Uint8List>> finalizeCaptureAndRestart() async {
     if (_deferrable != null && _halted) {
       _artifact = await _deferrable!.finalizeCapture();
@@ -97,5 +136,9 @@ class BugSessionVideoVisualCapture {
     return {
       'visual/${artifact.archiveFileName}': artifact.bytes,
     };
+  }
+
+  void discardCachedArtifact() {
+    _artifact = null;
   }
 }

@@ -4,6 +4,8 @@ import '../kit/bug_session_config.dart';
 import '../models/recorded_action.dart';
 import '../replay/coordinate_tap_replay.dart';
 import '../runtime/recorder_target_registry.dart';
+import '../runtime/runtime_text_input_recorder_id.dart';
+import '../runtime/text_input_target_registry.dart';
 import 'interaction_recorder.dart';
 
 /// MVP interaction engine using semantic target ids (Section 7).
@@ -13,6 +15,7 @@ class SemanticInteractionRecorder implements InteractionRecorder {
     this.replayStepDelay = Duration.zero,
     this.replaySettle,
     this.tryReplayAction,
+    this.tryReplayTextInput,
     this.resolveReplayTapPosition,
     this.resolveRecorderTargetId,
   });
@@ -21,6 +24,7 @@ class SemanticInteractionRecorder implements InteractionRecorder {
   final Duration replayStepDelay;
   final BugSessionReplaySettle? replaySettle;
   final BugSessionTryReplayAction? tryReplayAction;
+  final BugSessionTryReplayTextInput? tryReplayTextInput;
   final BugSessionResolveReplayTapPosition? resolveReplayTapPosition;
   final BugSessionResolveRecorderTargetId? resolveRecorderTargetId;
 
@@ -158,6 +162,11 @@ class SemanticInteractionRecorder implements InteractionRecorder {
         );
       } catch (e, _) {
         onActionFailed?.call(action, e);
+        // Unwired text fields must not abort the whole clip (search, etc.).
+        if (action.type == RecordedActionType.textInput &&
+            e is TextInputTargetNotFoundException) {
+          continue;
+        }
         rethrow;
       }
     }
@@ -285,10 +294,25 @@ class SemanticInteractionRecorder implements InteractionRecorder {
         }
         throw TargetNotFoundException(target, targetTimeout);
       case RecordedActionType.textInput:
+        if (tryReplayTextInput != null) {
+          final handled = await tryReplayTextInput!(
+            action,
+            shouldStop: shouldStop,
+          );
+          if (handled) {
+            break;
+          }
+        }
         final target = action.target;
         final text = action.text;
         if (target == null || text == null) {
           throw FormatException('Text input action missing target or text');
+        }
+        final registryId = _resolveTextInputRegistryId(action);
+        if (registryId == null || registryId.isEmpty) {
+          throw FormatException(
+            'Text input action missing recorder id for target "$target"',
+          );
         }
         final meta = action.metadata;
         final gx = meta['globalX'];
@@ -298,14 +322,22 @@ class SemanticInteractionRecorder implements InteractionRecorder {
             Offset(gx.toDouble(), gy.toDouble()),
             shouldStop: shouldStop,
           );
-        } else if (RecorderTargetRegistry.instance.hasTarget(target)) {
-          await RecorderTargetRegistry.instance.activate(
-            target,
-            timeout: targetTimeout,
-          );
+        } else {
+          final resolved = resolveReplayTapPosition?.call(action);
+          if (resolved != null) {
+            await replayCoordinateTap(resolved, shouldStop: shouldStop);
+          } else if (RecorderTargetRegistry.instance.hasTarget(target)) {
+            await RecorderTargetRegistry.instance.activate(
+              target,
+              timeout: targetTimeout,
+            );
+          }
         }
-        // Recorded [text] is in the session for QA evidence; filling fields
-        // automatically is not supported for all Flutter inputs yet.
+        await TextInputTargetRegistry.instance.apply(
+          registryId,
+          text,
+          timeout: targetTimeout,
+        );
         break;
       case RecordedActionType.navigation:
         final replayNavigation = this.replayNavigation;
@@ -327,5 +359,30 @@ class SemanticInteractionRecorder implements InteractionRecorder {
       case RecordedActionType.swipe:
         break;
     }
+  }
+
+  String? _resolveTextInputRegistryId(RecordedAction action) {
+    final recorderId = action.metadata['recorderId'];
+    if (recorderId is String && recorderId.isNotEmpty) {
+      return recorderId;
+    }
+    final resolved = resolveRecorderTargetId?.call(action);
+    if (resolved != null && resolved.isNotEmpty) {
+      return resolved;
+    }
+    final target = action.target;
+    if (target == null || target.isEmpty) {
+      return null;
+    }
+    if (target.contains('.input.')) {
+      return target;
+    }
+    if (!target.contains('/')) {
+      return target;
+    }
+    final slash = target.lastIndexOf('/');
+    final route = target.substring(0, slash);
+    final label = target.substring(slash + 1);
+    return runtimeTextInputRecorderId(routeKey: route, fieldLabel: label);
   }
 }

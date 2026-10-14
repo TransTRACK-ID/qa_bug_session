@@ -1,11 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import '../kit/bug_session_kit.dart';
-import '../replay/bug_session_chrome_hit_test.dart';
 import '../models/recorded_action.dart';
+import '../replay/bug_session_chrome_hit_test.dart';
+import '../runtime/bug_session_active_route.dart';
+import '../runtime/bug_session_tap_probe.dart';
 
 /// Records session-start route and taps outside BugSession chrome while recording.
 class BugSessionInteractionCaptureLayer extends StatefulWidget {
@@ -27,6 +31,9 @@ class _BugSessionInteractionCaptureLayerState
     extends State<BugSessionInteractionCaptureLayer> {
   bool _loggedSessionStart = false;
   String? _pendingTextTarget;
+  Offset? _pendingTextGlobal;
+  Map<String, Object?> _pendingTextMetadata = const {};
+  String _lastRecordedTextForTarget = '';
 
   @override
   void initState() {
@@ -71,18 +78,28 @@ class _BugSessionInteractionCaptureLayerState
     if (route == null) {
       return;
     }
+    final payload = <String, dynamic>{
+      'name': route,
+      'label': label,
+    };
+    if (label == 'session_start') {
+      final activeTab = widget.kit.config.activeNavbarTabRouteName?.call();
+      if (activeTab != null && activeTab.isNotEmpty) {
+        payload['activeTab'] = activeTab;
+      }
+    }
     _appendAction(
       RecordedAction(
         type: RecordedActionType.navigation,
         timestampMs: widget.kit.recorder.isShadowplayActive
             ? widget.kit.recorder.shadowplay.elapsedMs()
             : widget.kit.recorder.semantic.elapsedMs(),
-        route: '{"name":"$route","label":"$label"}',
+        route: jsonEncode(payload),
       ),
     );
   }
 
-  String? _currentRouteName() {
+  String _routeKeyForRecordedTap(BuildContext context) {
     final fromHost = widget.kit.config.currentRouteName?.call();
     if (fromHost != null && fromHost.isNotEmpty) {
       return fromHost;
@@ -98,6 +115,37 @@ class _BugSessionInteractionCaptureLayerState
     if (name != null && name.isNotEmpty) {
       return name;
     }
+    final fromActions = lastNamedRouteFromActions(
+      widget.kit.recorder.recordedActions,
+    );
+    if (fromActions != null && fromActions.isNotEmpty) {
+      return fromActions;
+    }
+    return 'unknown_route';
+  }
+
+  String? _currentRouteName() {
+    final label = _routeKeyForRecordedTap(context);
+    if (label == 'unknown_route') {
+      return null;
+    }
+    return label;
+  }
+
+  String? _screenLabelForTap(BuildContext context, String routeKey) {
+    final fromHost = widget.kit.config.resolveTapScreenLabel?.call(
+      context,
+      routeKey,
+    );
+    if (fromHost != null && fromHost.isNotEmpty) {
+      return fromHost;
+    }
+    if (routeKey != 'unknown_route' && routeKey.isNotEmpty) {
+      final pretty = displayRouteName(routeKey);
+      if (pretty.isNotEmpty) {
+        return pretty;
+      }
+    }
     return null;
   }
 
@@ -109,10 +157,13 @@ class _BugSessionInteractionCaptureLayerState
     if (bugSessionChromeHitAt(event.position)) {
       return;
     }
-    final route = _currentRouteName() ?? 'unknown_route';
-    final label = _semanticsLabelAt(event.position) ?? 'tap';
+    final route = _routeKeyForRecordedTap(context);
+    final semanticsLabel = _semanticsLabelAt(event.position);
+    final label = semanticsLabel ?? 'tap';
     final target = '$route/$label';
     final recorderId = _recorderIdAt(event.position);
+    final widgetType = widgetTypeAtGlobal(event.position, context);
+    final screenLabel = _screenLabelForTap(context, route);
     widget.kit.tapRipples.recordTap(event.position);
     final view = View.of(context);
     final logicalSize = view.physicalSize / view.devicePixelRatio;
@@ -134,22 +185,74 @@ class _BugSessionInteractionCaptureLayerState
               ? event.position.dy / logicalSize.height
               : 0.0,
           if (recorderId != null) 'recorderId': recorderId,
+          if (semanticsLabel != null && semanticsLabel.isNotEmpty)
+            'semanticsLabel': semanticsLabel,
+          if (widgetType != null && widgetType.isNotEmpty)
+            'widgetType': widgetType,
+          if (screenLabel != null && screenLabel.isNotEmpty)
+            'screenLabel': screenLabel,
+          'screenRoute': route,
         },
       ),
     );
-    _scheduleTextCaptureFromHit(event.position, fallbackTarget: target);
+    _scheduleTextCaptureFromHit(
+      event.position,
+      fallbackTarget: target,
+      tapMetadata: {
+        'globalX': event.position.dx,
+        'globalY': event.position.dy,
+        'normalizedX': logicalSize.width > 0
+            ? event.position.dx / logicalSize.width
+            : 0.0,
+        'normalizedY': logicalSize.height > 0
+            ? event.position.dy / logicalSize.height
+            : 0.0,
+        if (recorderId != null) 'recorderId': recorderId,
+        if (semanticsLabel != null && semanticsLabel.isNotEmpty)
+          'semanticsLabel': semanticsLabel,
+        if (widgetType != null && widgetType.isNotEmpty) 'widgetType': widgetType,
+        if (screenLabel != null && screenLabel.isNotEmpty)
+          'screenLabel': screenLabel,
+        'screenRoute': route,
+      },
+    );
   }
 
   void _scheduleTextCaptureFromHit(
     Offset global, {
     required String fallbackTarget,
+    required Map<String, Object?> tapMetadata,
   }) {
     final editable = _editableAt(global);
     if (editable == null) {
-      _flushPendingTextInput();
+      _flushPendingTextInput(
+        editableAt: _pendingTextGlobal != null
+            ? _editableAt(_pendingTextGlobal!)
+            : null,
+      );
       return;
     }
+    final wiredRecorderId = tapMetadata['recorderId'];
+    if (wiredRecorderId is String && wiredRecorderId.isNotEmpty) {
+      if (_pendingTextTarget != null) {
+        _flushPendingTextInput(
+          editableAt: _pendingTextGlobal != null
+              ? _editableAt(_pendingTextGlobal!)
+              : null,
+        );
+      }
+      return;
+    }
+    if (_pendingTextTarget != null && _pendingTextTarget != fallbackTarget) {
+      _flushPendingTextInput(
+        editableAt: _pendingTextGlobal != null
+            ? _editableAt(_pendingTextGlobal!)
+            : null,
+      );
+    }
     _pendingTextTarget = fallbackTarget;
+    _pendingTextGlobal = global;
+    _pendingTextMetadata = tapMetadata;
     Future<void>.delayed(const Duration(milliseconds: 400), () {
       if (!mounted || !widget.kit.recorder.isCapturing) {
         return;
@@ -157,38 +260,75 @@ class _BugSessionInteractionCaptureLayerState
       if (_pendingTextTarget != fallbackTarget) {
         return;
       }
-      final plainText = editable.text?.toPlainText(includeSemanticsLabels: false) ?? '';
-      if (plainText.isEmpty) {
-        return;
-      }
-      final view = View.of(context);
-      final logicalSize = view.physicalSize / view.devicePixelRatio;
-      _appendAction(
-        RecordedAction(
-          type: RecordedActionType.textInput,
-          timestampMs: widget.kit.recorder.isShadowplayActive
-              ? widget.kit.recorder.shadowplay.elapsedMs()
-              : widget.kit.recorder.semantic.elapsedMs(),
-          target: fallbackTarget,
-          text: plainText,
-          metadata: {
-            'globalX': global.dx,
-            'globalY': global.dy,
-            'normalizedX': logicalSize.width > 0
-                ? global.dx / logicalSize.width
-                : 0.0,
-            'normalizedY': logicalSize.height > 0
-                ? global.dy / logicalSize.height
-                : 0.0,
-          },
-        ),
+      _recordTextInputFromEditable(
+        editable,
+        fallbackTarget: fallbackTarget,
+        global: global,
+        tapMetadata: tapMetadata,
       );
-      _pendingTextTarget = null;
+      _clearPendingTextInput();
     });
   }
 
-  void _flushPendingTextInput() {
+  void _recordTextInputFromEditable(
+    RenderEditable editable, {
+    required String fallbackTarget,
+    required Offset global,
+    required Map<String, Object?> tapMetadata,
+  }) {
+    final plainText =
+        editable.text?.toPlainText(includeSemanticsLabels: false) ?? '';
+    final recorderId = tapMetadata['recorderId'];
+    final target = recorderId is String && recorderId.isNotEmpty
+        ? recorderId
+        : fallbackTarget;
+    // Skip empty on a virgin field (random taps); allow empty when clearing.
+    if (plainText.isEmpty) {
+      final prefix = '$target|';
+      final prior = _lastRecordedTextForTarget;
+      final hadNonEmptyForTarget =
+          prior.startsWith(prefix) && prior.length > prefix.length;
+      if (!hadNonEmptyForTarget) {
+        return;
+      }
+    }
+    final dedupeKey = '$target|$plainText';
+    if (dedupeKey == _lastRecordedTextForTarget) {
+      return;
+    }
+    _lastRecordedTextForTarget = dedupeKey;
+    _appendAction(
+      RecordedAction(
+        type: RecordedActionType.textInput,
+        timestampMs: widget.kit.recorder.isShadowplayActive
+            ? widget.kit.recorder.shadowplay.elapsedMs()
+            : widget.kit.recorder.semantic.elapsedMs(),
+        target: target,
+        text: plainText,
+        metadata: Map<String, Object?>.from(tapMetadata),
+      ),
+    );
+  }
+
+  void _flushPendingTextInput({RenderEditable? editableAt}) {
+    final target = _pendingTextTarget;
+    final global = _pendingTextGlobal;
+    final meta = _pendingTextMetadata;
+    if (target != null && global != null && editableAt != null) {
+      _recordTextInputFromEditable(
+        editableAt,
+        fallbackTarget: target,
+        global: global,
+        tapMetadata: meta,
+      );
+    }
+    _clearPendingTextInput();
+  }
+
+  void _clearPendingTextInput() {
     _pendingTextTarget = null;
+    _pendingTextGlobal = null;
+    _pendingTextMetadata = const {};
   }
 
   RenderEditable? _editableAt(Offset global) {

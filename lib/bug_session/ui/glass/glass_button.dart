@@ -53,9 +53,12 @@ class GlassButton extends StatelessWidget {
         child: GlassPanel(
           theme: theme,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: InkWell(
-            onTap: onPressed,
-            child: Center(child: child),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onPressed,
+              child: Center(child: child),
+            ),
           ),
         ),
       );

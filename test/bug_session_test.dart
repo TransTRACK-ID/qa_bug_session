@@ -241,7 +241,10 @@ void main() {
       await recorder.start(sessionId: 'bug-session-catalog');
       recorder.semantic.recordTap('demo.tap');
       final session = await recorder.stop(_env());
-      await kit.catalog.addFromStoppedSession(session);
+      await kit.catalog.addFromStoppedSession(
+        session,
+        recordingKind: BugSessionRecordingKind.fullRecord,
+      );
 
       var entries = await kit.catalog.listEntries();
       expect(entries, hasLength(1));
@@ -279,7 +282,10 @@ void main() {
       await kit.recorder.start(sessionId: 'mem-session');
       kit.recorder.semantic.recordTap('demo.replay');
       final session = await kit.recorder.stop(_env());
-      await kit.catalog.addFromStoppedSession(session);
+      await kit.catalog.addFromStoppedSession(
+        session,
+        recordingKind: BugSessionRecordingKind.fullRecord,
+      );
 
       final loaded = await kit.catalog.loadSession('mem-session');
       expect(loaded.actions.first.target, 'demo.replay');
@@ -352,6 +358,17 @@ void main() {
       );
       expect(stopped.cancelled, isTrue);
       expect(stopped.actionsSucceeded, 0);
+    });
+  });
+
+  group('QA issue Screenshoot', () {
+    test('format includes Jam and zip URL', () {
+      final text = formatQaIssueScreenshootSection(
+        jamUrl: 'https://jam.dev/c/abc',
+        bugSessionZipUrl: 'https://cdn.example/bug.zip',
+      );
+      expect(text, contains('Jam recording: https://jam.dev/c/abc'));
+      expect(text, contains('BugSession replay (.zip): https://cdn.example/bug.zip'));
     });
   });
 

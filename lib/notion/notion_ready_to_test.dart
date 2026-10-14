@@ -1,12 +1,14 @@
 // Ready to Test queue: filtered list, read-only detail, to-do checkbox updates.
 
 import 'notion_api.dart';
+import 'notion_schema_helpers.dart';
 
 /// Filter and property names for the QA "Ready to Test" Notion view.
 class ReadyToTestConfig {
   const ReadyToTestConfig({
     required this.qaUserId,
     this.statusEquals = 'Ready to Test',
+    this.queueStatuses = const ['Ready to Test', 'On Testing'],
     this.productDomain,
     this.statusPropertyName = 'Status',
     this.productPropertyName = 'Product domain',
@@ -17,6 +19,9 @@ class ReadyToTestConfig {
   final String qaUserId;
 
   final String statusEquals;
+
+  /// In-app queue: tasks matching any of these status values (OR).
+  final List<String> queueStatuses;
   final String? productDomain;
   final String statusPropertyName;
   final String productPropertyName;
@@ -84,6 +89,55 @@ class ReadyToTestTaskDetail {
 
   List<NotionTodoBlock> get todos =>
       bodyBlocks.whereType<NotionTodoBlock>().toList();
+
+  /// Text under a heading (e.g. **Expected**, **Actual**) on bug child cards.
+  String sectionText(String normalizedSection) =>
+      readNotionBodySection(bodyBlocks, normalizedSection);
+}
+
+/// Collects paragraph/bullet text under the first [normalizedSection] heading.
+String readNotionBodySection(
+  List<NotionBodyBlock> blocks,
+  String normalizedSection,
+) {
+  final target = normalizeNotionKey(normalizedSection);
+  String? activeSection;
+  final parts = <String>[];
+
+  for (final block in blocks) {
+    switch (block) {
+      case NotionHeadingBlock(:final text):
+        activeSection = normalizeNotionKey(text);
+        if (activeSection == target) {
+          parts.clear();
+        }
+      case NotionParagraphBlock(:final text):
+        if (activeSection == target) {
+          final trimmed = text.trim();
+          if (trimmed.isNotEmpty) {
+            parts.add(trimmed);
+          }
+        }
+      case NotionBulletedBlock(:final text):
+        if (activeSection == target) {
+          final trimmed = text.trim();
+          if (trimmed.isNotEmpty) {
+            parts.add('• $trimmed');
+          }
+        }
+      case NotionTodoBlock(:final text):
+        if (activeSection == target) {
+          final trimmed = text.trim();
+          if (trimmed.isNotEmpty) {
+            parts.add(trimmed);
+          }
+        }
+      default:
+        break;
+    }
+  }
+
+  return parts.join('\n');
 }
 
 class _StatusPropertyInfo {
@@ -104,8 +158,24 @@ class ReadyToTestService {
     final titleProp = _findTitlePropertyName(schema);
     final statusInfo = _resolveStatusProperty(schema, config.statusPropertyName);
 
+    final queueStatuses = config.queueStatuses.isNotEmpty
+        ? config.queueStatuses
+        : [config.statusEquals];
+    final statusFilter = queueStatuses.length == 1
+        ? _statusFilter(
+            statusInfo.name,
+            statusInfo.type,
+            queueStatuses.single,
+          )
+        : {
+            'or': [
+              for (final status in queueStatuses)
+                _statusFilter(statusInfo.name, statusInfo.type, status),
+            ],
+          };
+
     final andFilters = <Map<String, dynamic>>[
-      _statusFilter(statusInfo.name, statusInfo.type, config.statusEquals),
+      statusFilter,
       {
         'property': config.qaPropertyName,
         'people': {'contains': config.qaUserId},
@@ -340,6 +410,21 @@ class NotionTaskStatusService {
   NotionTaskStatusService(this._client);
 
   final NotionClient _client;
+
+  Future<String> readPageStatus(
+    String pageId, {
+    String? statusPropertyOverride,
+  }) async {
+    final resolvedId = extractNotionPageId(pageId) ?? pageId;
+    final schema = await _client.getDataSourceSchema();
+    final info = ReadyToTestService._resolveStatusProperty(
+      schema,
+      statusPropertyOverride ?? 'Status',
+    );
+    final page = await _client.getPage(resolvedId);
+    final props = page['properties'] as Map<String, dynamic>? ?? {};
+    return ReadyToTestService._readStatus(props, info.name, info.type);
+  }
 
   Future<void> updateStatus({
     required String pageId,

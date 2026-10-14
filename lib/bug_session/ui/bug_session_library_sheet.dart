@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../kit/bug_session_background_work.dart';
 import '../kit/bug_session_kit.dart';
 import '../library/bug_session_catalog_entry.dart';
 import 'bug_session_session_actions.dart';
@@ -55,22 +56,192 @@ class BugSessionLibrarySheet extends StatelessWidget {
   }
 }
 
-class _BugSessionLibraryList extends StatelessWidget {
+class _BugSessionLibraryList extends StatefulWidget {
   const _BugSessionLibraryList({required this.kit});
 
   final BugSessionKit kit;
 
   @override
+  State<_BugSessionLibraryList> createState() => _BugSessionLibraryListState();
+}
+
+class _BugSessionLibraryListState extends State<_BugSessionLibraryList> {
+  bool _selectionMode = false;
+  final Set<String> _selectedIds = {};
+
+  void _enterSelectionMode() {
+    setState(() => _selectionMode = true);
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelected(String sessionId) {
+    setState(() {
+      if (_selectedIds.contains(sessionId)) {
+        _selectedIds.remove(sessionId);
+      } else {
+        _selectedIds.add(sessionId);
+      }
+    });
+  }
+
+  void _selectAll(List<BugSessionCatalogEntry> entries) {
+    setState(() {
+      _selectedIds
+        ..clear()
+        ..addAll(entries.map((e) => e.sessionId));
+    });
+  }
+
+  void _clearSelection() {
+    setState(() => _selectedIds.clear());
+  }
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _bulkExport() async {
+    final ids = _selectedIds.toList();
+    if (ids.isEmpty || widget.kit.backgroundWork.active) {
+      return;
+    }
+    var ok = 0;
+    var failed = 0;
+    try {
+      await widget.kit.backgroundWork.run(
+        config: widget.kit.config,
+        title: 'Exporting sessions',
+        startToast: 'Exporting ${ids.length} session(s)…',
+        successToast: null,
+        errorToastPrefix: 'Export failed',
+        phases: [
+          BugSessionWorkPhase(
+            label: 'Writing zips',
+            weight: 1,
+            run: (r) async {
+              for (var i = 0; i < ids.length; i++) {
+                try {
+                  await widget.kit.catalog.exportSessionToDisk(ids[i]);
+                  ok++;
+                } catch (_) {
+                  failed++;
+                }
+                r((i + 1) / ids.length);
+              }
+            },
+          ),
+        ],
+      );
+      if (!mounted) {
+        return;
+      }
+      final summary = failed == 0
+          ? 'Exported $ok session${ok == 1 ? '' : 's'} to device storage'
+          : 'Exported $ok of ${ids.length}; $failed failed';
+      BugSessionTaskToasts.notifySuccess(widget.kit.config, summary);
+      _exitSelectionMode();
+    } catch (_) {}
+  }
+
+  Future<void> _bulkDelete() async {
+    final ids = _selectedIds.toList();
+    if (ids.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${ids.length} session${ids.length == 1 ? '' : 's'}?'),
+        content: const Text(
+          'Removes the selected entries and any on-device zips '
+          '(may contain credentials).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await widget.kit.catalog.deleteSessions(ids);
+    for (final id in ids) {
+      widget.kit.discardLastSessionIfDeleted(id);
+    }
+    if (!mounted) return;
+    _exitSelectionMode();
+    _snack('Deleted ${ids.length} session${ids.length == 1 ? '' : 's'}');
+  }
+
+  String _entrySubtitle(BugSessionCatalogEntry entry) {
+    return '${entry.recordingKindLabel} · ${entry.source.name} · '
+        'v${entry.appVersion} · ${entry.actionCount} actions';
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final theme = kit.config.resolvedTheme;
+    final theme = widget.kit.config.resolvedTheme;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
+        StreamBuilder<List<BugSessionCatalogEntry>>(
+          stream: widget.kit.catalog.watchEntries(),
+          builder: (context, snapshot) {
+            final entries = snapshot.data ?? [];
+            if (entries.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            if (_selectionMode) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => _selectAll(entries),
+                      child: const Text('Select all'),
+                    ),
+                    TextButton(
+                      onPressed: _clearSelection,
+                      child: const Text('Clear'),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: _exitSelectionMode,
+                      child: const Text('Cancel'),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _enterSelectionMode,
+                  child: const Text('Select'),
+                ),
+              ),
+            );
+          },
+        ),
         Flexible(
           child: StreamBuilder<List<BugSessionCatalogEntry>>(
-            stream: kit.catalog.watchEntries(),
+            stream: widget.kit.catalog.watchEntries(),
             builder: (context, snapshot) {
               final entries = snapshot.data ?? [];
               if (entries.isEmpty) {
@@ -88,23 +259,33 @@ class _BugSessionLibraryList extends StatelessWidget {
                 separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final entry = entries[index];
+                  final selected = _selectedIds.contains(entry.sessionId);
                   return Material(
                     color: Colors.transparent,
                     child: ListTile(
                       contentPadding: EdgeInsets.zero,
+                      leading: _selectionMode
+                          ? Checkbox(
+                              value: selected,
+                              onChanged: (_) => _toggleSelected(entry.sessionId),
+                            )
+                          : null,
                       title: Text(
                         entry.displayName,
                         style: const TextStyle(color: Colors.white),
                       ),
                       subtitle: Text(
-                        '${entry.source.name} · v${entry.appVersion} · '
-                        '${entry.actionCount} actions',
+                        _entrySubtitle(entry),
                         style: const TextStyle(
                           color: Colors.white60,
                           fontSize: 12,
                         ),
                       ),
                       onTap: () {
+                        if (_selectionMode) {
+                          _toggleSelected(entry.sessionId);
+                          return;
+                        }
                         Navigator.of(context).pushNamed(
                           BugSessionLibrarySheet._detailRoute,
                           arguments: entry,
@@ -117,12 +298,27 @@ class _BugSessionLibraryList extends StatelessWidget {
             },
           ),
         ),
+        if (_selectionMode && _selectedIds.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          GlassButton(
+            theme: theme,
+            label: 'Export selected (${_selectedIds.length})',
+            filled: true,
+            onPressed: _bulkExport,
+          ),
+          const SizedBox(height: 8),
+          GlassButton(
+            theme: theme,
+            label: 'Delete selected (${_selectedIds.length})',
+            onPressed: _bulkDelete,
+          ),
+        ],
         const SizedBox(height: 12),
         StreamBuilder<List<BugSessionCatalogEntry>>(
-          stream: kit.catalog.watchEntries(),
+          stream: widget.kit.catalog.watchEntries(),
           builder: (context, snapshot) {
             final entries = snapshot.data ?? [];
-            if (entries.isEmpty) {
+            if (entries.isEmpty || _selectionMode) {
               return const SizedBox.shrink();
             }
             return GlassButton(
@@ -152,8 +348,8 @@ class _BugSessionLibraryList extends StatelessWidget {
                 if (confirmed != true || !context.mounted) {
                   return;
                 }
-                await kit.catalog.clearAll();
-                kit.recorder.discardLastSession();
+                await widget.kit.catalog.clearAll();
+                widget.kit.recorder.discardLastSession();
                 if (context.mounted) {
                   Navigator.of(context).popUntil((route) => route.isFirst);
                   Navigator.of(context, rootNavigator: true).pop();

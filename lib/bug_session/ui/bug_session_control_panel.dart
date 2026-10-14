@@ -2,11 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../jam/jam_session_video_upload.dart';
+import '../kit/bug_session_background_work.dart';
 import '../kit/bug_session_kit.dart';
 import '../models/bug_session.dart';
 import '../kit/bug_session_modal_context.dart';
 import '../kit/bug_session_theme.dart';
 import '../recording/bug_session_recorder.dart';
+import '../library/bug_session_catalog_entry.dart';
+import '../library/bug_session_recording_kind.dart';
 import '../replay/bug_session_replayer.dart';
 import '../runtime/bug_session_environment.dart';
 import 'bug_session_capture_mode.dart';
@@ -129,13 +133,11 @@ class _BugSessionControlPanelState extends State<BugSessionControlPanel> {
   }
 
   Future<void> _saveShadowplayClip() async {
-    if (_finalizingSession) {
+    if (_finalizingSession || kit.backgroundWork.active) {
       return;
     }
-    setState(() {
-      _finalizingSession = true;
-      _status = 'Saving clip…';
-    });
+    setState(() => _finalizingSession = true);
+
     var env = kit.config.environmentBuilder?.call();
     if (env == null) {
       await kit.config.refreshEnvironment?.call();
@@ -150,36 +152,89 @@ class _BugSessionControlPanelState extends State<BugSessionControlPanel> {
       });
       return;
     }
+
+    Future<Map<String, List<int>>>? videoEncode;
+    String? displayName;
+    BugSession? session;
+    var actionCount = 0;
+
     try {
-      await kit.recorder.haltShadowplayMediaForSave();
-      kit.controlPanelLayout.collapse();
-      final videoEncode = kit.recorder.finalizeDeferredVideoCapture();
-      String? displayName;
-      if (mounted) {
-        setState(() => _status = 'Name clip (video encoding…)');
-        displayName = await showBugSessionNameDialog(
-          requireBugSessionModalContext(kit.config, fallback: context),
-        );
-      }
-      setState(() => _status = 'Finishing video…');
-      final visualFiles = await videoEncode;
-      final session = await kit.recorder.buildShadowplayClipSession(env);
-      await kit.catalog.addFromStoppedSession(
-        session,
-        visualArchiveFiles: visualFiles,
-        displayName: displayName,
+      await kit.backgroundWork.run(
+        config: kit.config,
+        title: 'Saving clip',
+        startToast: 'Saving clip…',
+        successToast: 'Saved clip',
+        errorToastPrefix: 'Save failed',
+        phases: [
+          BugSessionWorkPhase(
+            label: 'Preparing clip',
+            weight: 1,
+            run: (r) async {
+              r(0);
+              await kit.recorder.haltShadowplayMediaForSave();
+              kit.controlPanelLayout.collapse();
+              videoEncode = kit.recorder.finalizeDeferredVideoCapture();
+              r(1);
+            },
+          ),
+          BugSessionWorkPhase(
+            label: 'Name clip',
+            weight: 0.2,
+            run: (r) async {
+              if (mounted) {
+                displayName = await showBugSessionNameDialog(
+                  requireBugSessionModalContext(kit.config, fallback: context),
+                );
+              }
+              r(1);
+            },
+          ),
+          BugSessionWorkPhase(
+            label: 'Encoding video',
+            weight: 2.5,
+            run: (r) async {
+              r(0);
+              final visualFiles = await videoEncode!;
+              r(0.5);
+              session = await kit.recorder.buildShadowplayClipSession(env!);
+              actionCount = session!.actions.length;
+              final clipTitle = displayName ??
+                  defaultBugSessionDisplayName(
+                    startedAt: session!.manifest.startedAt,
+                    actionCount: actionCount,
+                  );
+              final planned = await finalizeSessionVideoForCatalog(
+                kit,
+                visualArchiveFiles: visualFiles,
+                title: clipTitle,
+                onJamUploadProgress: r,
+              );
+              r(0.8);
+              await kit.catalog.addFromStoppedSession(
+                session!,
+                visualArchiveFiles: planned.archiveFiles,
+                displayName: displayName,
+                jamShareUrl: planned.jamShareUrl,
+                recordingKind: BugSessionRecordingKind.instantReplay,
+              );
+              if (planned.jamShareUrl != null) {
+                await kit.catalog.purgeVideoForSession(
+                  session!.manifest.sessionId,
+                );
+              }
+              kit.recorder.restoreLastSession(session!);
+              r(1);
+            },
+          ),
+        ],
       );
-      kit.recorder.restoreLastSession(session);
       if (mounted) {
-        kit.controlPanelLayout.collapse();
-        setState(() {
-          _status = 'Saved clip · ${session.actions.length} action(s)';
-        });
+        setState(() => _status = 'Saved clip · $actionCount action(s)');
       }
-    } catch (e) {
+    } catch (_) {
       await kit.recorder.recoverFromHaltedShadowplaySave();
       if (mounted) {
-        setState(() => _status = 'Save failed: $e');
+        setState(() => _status = 'Save failed');
       }
     } finally {
       if (mounted) {
@@ -191,13 +246,10 @@ class _BugSessionControlPanelState extends State<BugSessionControlPanel> {
   }
 
   Future<void> _stop() async {
-    if (_finalizingSession) {
+    if (_finalizingSession || kit.backgroundWork.active) {
       return;
     }
-    setState(() {
-      _finalizingSession = true;
-      _status = 'Finalizing recording…';
-    });
+    setState(() => _finalizingSession = true);
     try {
       await kit.config.refreshEnvironment?.call();
       final env = kit.config.environmentBuilder?.call();
@@ -205,38 +257,91 @@ class _BugSessionControlPanelState extends State<BugSessionControlPanel> {
         setState(() => _status = 'BugSession environment is not configured');
         return;
       }
-      final session = await kit.recorder.stop(env);
-      final visualFiles = kit.recorder.takeVisualArchiveFiles();
-      kit.controlPanelLayout.collapse();
+
+      BugSession? session;
       String? displayName;
-      if (mounted) {
-        displayName = await showBugSessionNameDialog(
-          requireBugSessionModalContext(kit.config, fallback: context),
-        );
-      }
-      await kit.catalog.addFromStoppedSession(
-        session,
-        visualArchiveFiles: visualFiles,
-        displayName: displayName,
+      var actionCount = 0;
+
+      await kit.backgroundWork.run(
+        config: kit.config,
+        title: 'Saving recording',
+        startToast: 'Saving session…',
+        successToast: 'Recording saved',
+        errorToastPrefix: 'Save failed',
+        phases: [
+          BugSessionWorkPhase(
+            label: 'Stopping recording',
+            weight: 1,
+            run: (r) async {
+              r(0);
+              session = await kit.recorder.stop(env);
+              kit.controlPanelLayout.collapse();
+              r(1);
+            },
+          ),
+          BugSessionWorkPhase(
+            label: 'Name session',
+            weight: 0.2,
+            run: (r) async {
+              if (mounted) {
+                displayName = await showBugSessionNameDialog(
+                  requireBugSessionModalContext(kit.config, fallback: context),
+                );
+              }
+              r(1);
+            },
+          ),
+          BugSessionWorkPhase(
+            label: 'Uploading & saving',
+            weight: 3,
+            run: (r) async {
+              r(0);
+              final visualFiles = kit.recorder.takeVisualArchiveFiles();
+              actionCount = session!.actions.length;
+              final stopTitle = displayName ??
+                  defaultBugSessionDisplayName(
+                    startedAt: session!.manifest.startedAt,
+                    actionCount: actionCount,
+                  );
+              final planned = await finalizeSessionVideoForCatalog(
+                kit,
+                visualArchiveFiles: visualFiles,
+                title: stopTitle,
+                onJamUploadProgress: r,
+              );
+              r(0.6);
+              await kit.catalog.addFromStoppedSession(
+                session!,
+                visualArchiveFiles: planned.archiveFiles,
+                displayName: displayName,
+                jamShareUrl: planned.jamShareUrl,
+                recordingKind: BugSessionRecordingKind.fullRecord,
+              );
+              if (planned.jamShareUrl != null) {
+                await kit.catalog.purgeVideoForSession(
+                  session!.manifest.sessionId,
+                );
+              }
+              kit.recorder.restoreLastSession(session!);
+              if (kit.config.manualRecordWithShadowplay &&
+                  kit.config.shadowplay.enabled) {
+                await kit.recorder.resumeShadowplayCapture();
+              }
+              r(1);
+            },
+          ),
+        ],
       );
-      kit.recorder.restoreLastSession(session);
+      if (mounted) {
+        setState(() => _status = 'Stopped · $actionCount action(s)');
+      }
+    } catch (_) {
       if (kit.config.manualRecordWithShadowplay &&
           kit.config.shadowplay.enabled) {
         await kit.recorder.resumeShadowplayCapture();
       }
       if (mounted) {
-        kit.controlPanelLayout.collapse();
-        setState(() {
-          _status = 'Stopped · ${session.actions.length} action(s)';
-        });
-      }
-    } catch (e) {
-      if (kit.config.manualRecordWithShadowplay &&
-          kit.config.shadowplay.enabled) {
-        await kit.recorder.resumeShadowplayCapture();
-      }
-      if (mounted) {
-        setState(() => _status = 'Save failed: $e');
+        setState(() => _status = 'Save failed');
       }
     } finally {
       if (mounted) {
@@ -279,29 +384,55 @@ class _BugSessionControlPanelState extends State<BugSessionControlPanel> {
       }
       return;
     }
-    setState(() => _status = 'Preparing export (video)…');
-    final entry = await kit.catalog.exportSessionToDisk(sessionId);
-    final path = entry.filePath;
-    if (path != null &&
-        kit.config.shareExport != null &&
-        kit.config.openShareSheetAfterExport) {
-      try {
-        await shareBugSessionCatalogEntry(config: kit.config, entry: entry);
-        setState(
-          () => _status =
-              'Share sheet opened — pick WhatsApp or another app',
-        );
-        return;
-      } catch (e) {
-        setState(() => _status = 'Export saved; share failed: $e');
-        return;
+    if (kit.backgroundWork.active) {
+      return;
+    }
+    try {
+      late BugSessionCatalogEntry entry;
+      await kit.backgroundWork.run(
+        config: kit.config,
+        title: 'Exporting session',
+        startToast: 'Exporting session…',
+        successToast: 'Session exported',
+        errorToastPrefix: 'Export failed',
+        phases: [
+          BugSessionWorkPhase(
+            label: 'Writing zip',
+            weight: 1,
+            run: (r) async {
+              r(0);
+              entry = await kit.catalog.exportSessionToDisk(sessionId);
+              r(1);
+            },
+          ),
+        ],
+      );
+      final path = entry.filePath;
+      if (path != null &&
+          kit.config.shareExport != null &&
+          kit.config.openShareSheetAfterExport) {
+        try {
+          await shareBugSessionCatalogEntry(kit: kit, entry: entry);
+          setState(
+            () => _status =
+                'Share sheet opened — pick WhatsApp or another app',
+          );
+          return;
+        } catch (e) {
+          setState(() => _status = 'Export saved; share failed: $e');
+          return;
+        }
+      }
+      setState(
+        () => _status = path != null
+            ? 'Exported (app storage — use Share from saved session)'
+            : 'Exported to device storage',
+      );
+    } catch (_) {
+      if (mounted) {
+        setState(() => _status = 'Export failed');
       }
     }
-    setState(
-      () => _status = path != null
-          ? 'Exported (app storage — use Share from saved session)'
-          : 'Exported to device storage',
-    );
   }
 
   Future<void> _import() async {
@@ -310,15 +441,43 @@ class _BugSessionControlPanelState extends State<BugSessionControlPanel> {
       setState(() => _status = 'Configure BugSessionConfig.filePicker');
       return;
     }
+    if (kit.backgroundWork.active) {
+      return;
+    }
     final bytes = await picker.pickBugSessionZip();
-    if (bytes == null) return;
-    await kit.catalog.importFromZipBytes(bytes);
-    setState(() => _status = 'Imported session');
-    if (kit.config.openLibraryAfterImport && mounted) {
-      await BugSessionLibrarySheet.show(
-        requireBugSessionModalContext(kit.config, fallback: context),
-        kit: kit,
+    if (bytes == null) {
+      return;
+    }
+    try {
+      await kit.backgroundWork.run(
+        config: kit.config,
+        title: 'Importing session',
+        startToast: 'Importing session…',
+        successToast: 'Session imported',
+        errorToastPrefix: 'Import failed',
+        phases: [
+          BugSessionWorkPhase(
+            label: 'Reading zip',
+            weight: 1,
+            run: (r) async {
+              r(0);
+              await kit.catalog.importFromZipBytes(bytes);
+              r(1);
+            },
+          ),
+        ],
       );
+      setState(() => _status = 'Imported session');
+      if (kit.config.openLibraryAfterImport && mounted) {
+        await BugSessionLibrarySheet.show(
+          requireBugSessionModalContext(kit.config, fallback: context),
+          kit: kit,
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _status = 'Import failed');
+      }
     }
   }
 
@@ -415,13 +574,12 @@ class _BugSessionControlPanelState extends State<BugSessionControlPanel> {
     final recording = kit.recorder.isRecording;
     final stopping =
         kit.recorder.state == BugSessionRecorderState.stopping;
-    final busy = stopping || recording || _finalizingSession;
+    final busy =
+        stopping || recording || _finalizingSession || kit.backgroundWork.active;
     final bufferSeconds =
         kit.config.shadowplay.defaultVideoRetention.inSeconds;
     final hasSaved = _savedCount > 0;
     final expanded = kit.controlPanelLayout.expanded;
-    final replayActive = kit.replayController.active;
-
     return Positioned(
       left: _position.dx,
       top: _position.dy,
@@ -432,43 +590,7 @@ class _BugSessionControlPanelState extends State<BugSessionControlPanel> {
         onPanUpdate: _onPanUpdate,
         child: AnimatedSize(
           duration: const Duration(milliseconds: 200),
-          child: replayActive
-              ? Material(
-                  color: Colors.transparent,
-                  child: GlassPanel(
-                    theme: theme,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.play_circle_outline,
-                          color: Colors.white70,
-                          size: 18,
-                        ),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Replaying session…',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        GlassButton(
-                          theme: theme,
-                          label: 'Stop',
-                          filled: true,
-                          onPressed: kit.replayController.requestStop,
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              : expanded
+          child: expanded
               ? Material(
                   color: Colors.transparent,
                   child: GlassPanel(
@@ -646,24 +768,26 @@ class _BugSessionControlPanelState extends State<BugSessionControlPanel> {
                     borderRadius: BorderRadius.circular(24),
                     child: GlassPanel(
                       theme: theme,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      child: Row(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 14),
+                      child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           if (recording)
-                            const Padding(
-                              padding: EdgeInsets.only(right: 6),
-                              child: Icon(
-                                Icons.fiber_manual_record,
+                            Container(
+                              width: 3,
+                              height: 8,
+                              margin: const EdgeInsets.only(bottom: 6),
+                              decoration: BoxDecoration(
                                 color: Colors.redAccent,
-                                size: 12,
+                                borderRadius: BorderRadius.circular(2),
                               ),
                             ),
-                          const Text(
-                            'BugSession',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
+                          Container(
+                            width: 3,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              borderRadius: BorderRadius.circular(2),
                             ),
                           ),
                         ],

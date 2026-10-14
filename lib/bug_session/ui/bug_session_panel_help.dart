@@ -17,6 +17,7 @@ Future<void> showBugSessionPanelHelp(
     );
     await showModalBottomSheet<void>(
       context: modalContext,
+      useRootNavigator: true,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (ctx) {
@@ -57,31 +58,43 @@ Future<void> showBugSessionPanelHelp(
                     _helpBlock(
                       'Instant Replay (Shadowplay)',
                       'Always buffers the last $bufferSeconds seconds. '
-                      'Use Save clip to export actions + real-time video without '
-                      'stopping your work.',
+                      'Save clip stores actions in the library; screen video is '
+                      'uploaded to Jam.dev when configured (not kept on device).',
                     ),
                     _helpBlock(
                       'Full Record',
-                      'Start → use the app → End session. Saves the whole span '
-                      'with video (Shadowplay pauses while recording).',
+                      'Start → use the app → End session. Captures the full span '
+                      '(Shadowplay pauses while recording). Video goes to Jam when '
+                      'Ready to Test credentials are set.',
                     ),
                   ] else
                     _helpBlock(
                       'Recording',
-                      'Capture actions and video for bug reports.',
+                      'Capture actions for bug reports. Pair with Jam.dev in '
+                      'Ready to Test for screen recordings.',
                     ),
                   _helpBlock(
                     'Save clip',
-                    'Snapshot the rolling buffer to the library (name + MP4).',
+                    'Snapshot the rolling buffer to Saved sessions (actions + '
+                    'timeline). Jam link is attached when PAT/team id are configured.',
                   ),
                   _helpBlock(
                     'Export / Replay last',
-                    'Export shares zip + video. Replay last re-runs the most '
-                    'recent saved clip on the live backend.',
+                    'Export shares a .zip (session data) plus a Jam recording link '
+                    'in the share text—not a local MP4. Replay last re-runs the most '
+                    'recent saved session on the live backend.',
                   ),
                   _helpBlock(
                     'Saved sessions',
-                    'Browse clips, open What happened?, replay, export, or share.',
+                    'Browse sessions, open What happened?, replay, export, or share. '
+                    'Card QA runs are saved here when you stop or complete testing.',
+                  ),
+                  _helpBlock(
+                    'Test this card (Notion)',
+                    'Issues upload video to Jam.dev and a BugSession replay .zip '
+                    '(Notion file block or host URL) under Screenshoot. Re-open a '
+                    'bug card to log another occurrence with a confirmation—no new '
+                    'child card.',
                   ),
                 ],
               ),

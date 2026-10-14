@@ -52,11 +52,15 @@ Widget wrapBugSessionDefaultVideoHost(
           ? constraints.maxHeight
           : screen.height;
       final kit = BugSessionScope.maybeOf(context);
+      final hideRipples = kit != null &&
+          kit.qaTesting.active &&
+          kit.config.hideRecordingChromeDuringQaTest;
       final recordedChild = Stack(
         fit: StackFit.expand,
         children: [
           child,
-          if (kit != null) BugSessionTapRippleOverlay(kit: kit),
+          if (kit != null && !hideRipples)
+            BugSessionTapRippleOverlay(kit: kit),
         ],
       );
       return ScreenRecorder(
@@ -100,6 +104,7 @@ bool _useRollingVideoBuffer(BuildContext? context) {
 
 class BugSessionDefaultMp4Exporter extends Exporter {
   bool _capturing = false;
+  bool _encoding = false;
   final List<int> _frameWallMs = [];
   BuildContext? _context;
 
@@ -108,6 +113,9 @@ class BugSessionDefaultMp4Exporter extends Exporter {
   }
 
   Future<void> prepareForRecording() async {
+    if (_encoding) {
+      return;
+    }
     _capturing = true;
     _frameWallMs.clear();
     _disposeBufferedImages();
@@ -152,15 +160,25 @@ class BugSessionDefaultMp4Exporter extends Exporter {
   }
 
   Future<BugSessionVideoArtifact?> finishAsMp4Artifact() async {
+    if (_encoding) {
+      return null;
+    }
+    _encoding = true;
+    _capturing = false;
+
     if (frames.isEmpty) {
+      _encoding = false;
       releaseFrameBuffer();
       return null;
     }
 
-    final snapshot = List<Frame>.from(frames);
+    final detached = List<Frame>.from(frames);
+    frames.clear();
+    _frameWallMs.clear();
+
     var maxWidth = 2;
     var maxHeight = 2;
-    for (final frame in snapshot) {
+    for (final frame in detached) {
       if (frame.image.width > maxWidth) {
         maxWidth = frame.image.width;
       }
@@ -170,6 +188,30 @@ class BugSessionDefaultMp4Exporter extends Exporter {
     }
     maxWidth = _evenDimension(maxWidth);
     maxHeight = _evenDimension(maxHeight);
+
+    final rgbaFrames = <Uint8List>[];
+    try {
+      for (final frame in detached) {
+        await _yieldToUi();
+        try {
+          rgbaFrames.add(
+            await _rgbaBytes(frame.image, maxWidth, maxHeight),
+          );
+        } on Object catch (e, st) {
+          debugPrint('BugSession skip video frame: $e\n$st');
+        } finally {
+          frame.image.dispose();
+        }
+      }
+    } finally {
+      clear();
+      _frameWallMs.clear();
+    }
+
+    if (rgbaFrames.isEmpty) {
+      _encoding = false;
+      return null;
+    }
 
     File? tempFile;
     try {
@@ -189,9 +231,7 @@ class BugSessionDefaultMp4Exporter extends Exporter {
         filepath: tempFile.path,
       );
 
-      for (final frame in snapshot) {
-        await _yieldToUi();
-        final rgba = await _rgbaBytes(frame.image, maxWidth, maxHeight);
+      for (final rgba in rgbaFrames) {
         await FlutterQuickVideoEncoder.appendVideoFrame(rgba);
       }
 
@@ -204,12 +244,15 @@ class BugSessionDefaultMp4Exporter extends Exporter {
         bytes: bytes,
         archiveFileName: 'session.mp4',
         mimeType: 'video/mp4',
+        width: maxWidth,
+        height: maxHeight,
       );
     } on Object catch (e, st) {
       debugPrint('BugSession MP4 encode failed: $e\n$st');
       return null;
     } finally {
-      releaseFrameBuffer();
+      _encoding = false;
+      _capturing = false;
       if (tempFile != null && tempFile.existsSync()) {
         try {
           tempFile.deleteSync();
@@ -227,6 +270,13 @@ class BugSessionDefaultMp4Exporter extends Exporter {
     clear();
   }
 
+  /// Encodes buffered frames, clears the buffer, and resumes capture.
+  Future<BugSessionVideoArtifact?> snapshotMp4AndContinue() async {
+    final artifact = await finishAsMp4Artifact();
+    await prepareForRecording();
+    return artifact;
+  }
+
   void _disposeBufferedImages() {
     for (final frame in frames) {
       frame.image.dispose();
@@ -235,6 +285,10 @@ class BugSessionDefaultMp4Exporter extends Exporter {
 }
 
 Future<Uint8List> _rgbaBytes(ui.Image image, int width, int height) async {
+  if (image.width <= 0 || image.height <= 0 || width < 2 || height < 2) {
+    throw StateError('Invalid video frame size');
+  }
+
   if (image.width == width && image.height == height) {
     final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
     if (byteData == null) {
@@ -243,13 +297,26 @@ Future<Uint8List> _rgbaBytes(ui.Image image, int width, int height) async {
     return byteData.buffer.asUint8List();
   }
 
+  final srcW = image.width.toDouble();
+  final srcH = image.height.toDouble();
+  final dstW = width.toDouble();
+  final dstH = height.toDouble();
+
+  // Letterbox: scale to fit inside encoder dimensions (avoids invalid drawImageRect).
+  final scale = (dstW / srcW) < (dstH / srcH) ? dstW / srcW : dstH / srcH;
+  final drawW = (srcW * scale).floorToDouble();
+  final drawH = (srcH * scale).floorToDouble();
+  final offsetX = ((dstW - drawW) / 2).floorToDouble();
+  final offsetY = ((dstH - drawH) / 2).floorToDouble();
+
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder);
+  final paint = Paint()..filterQuality = FilterQuality.medium;
   canvas.drawImageRect(
     image,
-    Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-    Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
-    Paint(),
+    Rect.fromLTWH(0, 0, srcW, srcH),
+    Rect.fromLTWH(offsetX, offsetY, drawW, drawH),
+    paint,
   );
   final picture = recorder.endRecording();
   final resized = await picture.toImage(width, height);
@@ -291,5 +358,19 @@ class BugSessionDefaultVideoCapture
   Future<BugSessionVideoArtifact?> stop() async {
     await haltCapture();
     return finalizeCapture();
+  }
+
+  @override
+  Future<void> waitForMinimumFrames({
+    int minimum = 1,
+    Duration timeout = const Duration(seconds: 6),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (bugSessionDefaultMp4Exporter.frames.length >= minimum) {
+        return;
+      }
+      await _yieldToUi();
+    }
   }
 }

@@ -12,10 +12,12 @@ import '../runtime/bug_session_environment.dart';
 import '../security/session_lock_validator.dart';
 import 'interaction_recorder.dart';
 import 'network_recorder.dart';
+import 'bug_session_video_capture.dart';
 import 'bug_session_video_visual_capture.dart';
 import 'bug_session_visual_capture.dart';
 import '../shadowplay/bug_session_shadowplay_engine.dart';
 import '../shadowplay/shadowplay_settings.dart';
+import '../replay/bug_session_replay_action_filter.dart';
 import 'semantic_interaction_recorder.dart';
 
 export 'semantic_interaction_recorder.dart';
@@ -142,6 +144,30 @@ class BugSessionRecorder extends ChangeNotifier {
     shadowplay.recordAction(action);
   }
 
+  /// Records a text field value for full-record or Instant Replay capture.
+  void recordCapturedTextInput(
+    String target,
+    String text, {
+    Map<String, Object?> metadata = const {},
+  }) {
+    if (isRecording) {
+      semantic.recordTextInput(target, text, metadata: metadata);
+      return;
+    }
+    if (!isShadowplayActive || _shadowplayCaptureSuspended) {
+      return;
+    }
+    recordShadowplayAction(
+      RecordedAction(
+        type: RecordedActionType.textInput,
+        timestampMs: shadowplay.elapsedMs(),
+        target: target,
+        text: text,
+        metadata: metadata,
+      ),
+    );
+  }
+
   Future<void> suspendShadowplayCapture() async {
     _shadowplayCaptureSuspended = true;
     await pauseShadowplayRollingVideo();
@@ -224,10 +250,11 @@ class BugSessionRecorder extends ChangeNotifier {
       ...?visualCapture?.toArchiveIndex(),
       ...?videoCapture?.toArchiveIndex(),
     ];
+    final preparedActions = bugSessionPrepareActionsForReplay(snap.actions);
     final session = BugSession(
       formatVersion: BugSession.supportedFormatVersion,
       manifest: manifest,
-      actions: snap.actions,
+      actions: preparedActions,
       networkEvents: snap.networkEvents,
       diagnostics: snap.diagnostics,
       visualEvidence: visualIndex,
@@ -285,6 +312,33 @@ class BugSessionRecorder extends ChangeNotifier {
     return files;
   }
 
+  /// Full-session MP4 while recording (pass / finish).
+  Future<BugSessionVideoArtifact?> snapshotVideoForIssue() async {
+    await videoCapture?.waitForBufferedFrames();
+    return videoCapture?.snapshotAndResume();
+  }
+
+  void holdQaTestingVideoCapture() {
+    videoCapture?.holdMaxDurationLimit();
+  }
+
+  void releaseQaTestingVideoCapture() {
+    videoCapture?.releaseMaxDurationLimit();
+  }
+
+  Future<BugSessionVideoArtifact?> finalizeFullSessionVideo() async {
+    return videoCapture?.finalizeWithoutResume();
+  }
+
+  String? get activeSessionId =>
+      _sessionId ?? lastSession?.manifest.sessionId;
+
+  /// Drops in-memory video bytes after a successful Jam.dev upload.
+  void discardLocalVideoAfterJamUpload() {
+    _visualArchiveFiles = const {};
+    videoCapture?.discardCachedArtifact();
+  }
+
   /// Stops rolling Shadowplay video only (events buffer keeps running).
   Future<void> pauseShadowplayRollingVideo() async {
     if (!isShadowplayActive) {
@@ -320,6 +374,57 @@ class BugSessionRecorder extends ChangeNotifier {
     visualCapture?.start();
     unawaited(videoCapture?.start());
     notifyListeners();
+  }
+
+  /// Snapshot of the active session for QA issue export without stopping capture.
+  BugSession buildInProgressSnapshot(BugSessionEnvironment environment) {
+    if (state != BugSessionRecorderState.recording) {
+      throw StateError('Not recording');
+    }
+    final startedAt = _startedAt;
+    final sessionId = _sessionId;
+    if (startedAt == null || sessionId == null) {
+      throw StateError('Recording session not initialized');
+    }
+
+    final stoppedAt = DateTime.now().toUtc();
+    final lock = BugSessionLock(
+      packageId: environment.packageId,
+      appVersion: environment.appVersion,
+      buildNumber: environment.buildNumber,
+      userId: environment.user.userId,
+      lockChecksum: SessionLockValidator.computeLockChecksum(
+        packageId: environment.packageId,
+        appVersion: environment.appVersion,
+        buildNumber: environment.buildNumber,
+        userId: environment.user.userId,
+        sessionId: sessionId,
+      ),
+    );
+
+    final manifest = BugSessionManifest(
+      sessionId: sessionId,
+      startedAt: startedAt,
+      stoppedAt: stoppedAt,
+      appVersion: environment.appVersion,
+      buildNumber: environment.buildNumber,
+      platform: environment.platform,
+      osVersion: environment.osVersion,
+      deviceModel: environment.deviceModel,
+      environment: environment.environment,
+      user: environment.user,
+      credential: environment.credential,
+      lock: lock,
+    );
+
+    return BugSession(
+      formatVersion: BugSession.supportedFormatVersion,
+      manifest: manifest,
+      actions: List<RecordedAction>.from(recordedActions),
+      networkEvents: networkRecorder.getEvents(),
+      diagnostics: List<DiagnosticEvent>.from(_diagnostics),
+      visualEvidence: const [],
+    );
   }
 
   Future<BugSession> stop(BugSessionEnvironment environment) async {

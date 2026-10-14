@@ -99,3 +99,35 @@ Re-run setup with `--force` to refresh generated files.
 - **Read:** data-source query (filtered), page properties, block tree.
 - **Write:** `to_do.checked` only via `submitTodoChanges` / `sync-todos`; optional status via `NotionTaskStatusService` / default `nts` mode.
 - Acceptance criteria must be native Notion **to-do** blocks (not manual `[ ]` text in paragraphs).
+
+## QA card testing mode (1.4+)
+
+From **Ready to Test → task detail → Start testing this card**:
+
+1. Sets status **On Testing**, switches BugSession to **Full Record**, collapses the FAB/sheets, and shows a draggable **Objective** checklist (unchecked items first).
+2. **Complete testing** (pass): confirm dialog → Jam upload → **Archived** + comment `PASSED ✅` + Jam link; syncs checklist changes to Notion. If **Archived** is missing from the database, QA is prompted to enter the exact status name.
+3. **Generate issue**: auto or manual bug fields → Jam video from session start → child bug card (Type/Status **Issues**, parent relation) or re-issue on existing child; parent → **On Feedback** on first issue; **Screenshoot** lists Jam + BugSession replay `.zip` (uploaded to Notion as a file block, or a public URL from `uploadIssueZipBytes`).
+4. **Stop testing** after feedback: ends recording without changing pass status.
+
+Configure **Jam PAT + team id** in the same Notion connection settings pane (`BugSessionConfig.jamDevCredentialsStore`). Optional `uploadIssueZipBytes` host callback returns a public URL for the zip comment.
+
+### Paste JSON (connection settings)
+
+On **Notion connection**, use **Paste JSON to fill all fields** to import a single object instead of typing each field. Example:
+
+```json
+{
+  "notion_token": "ntn_…",
+  "data_source_id": "c2046e5d-68c6-440d-83b3-4fdb2c1cefb6",
+  "qa_user_id": "223d872b-594c-8189-b6f5-000289706377",
+  "product_domain": "",
+  "jam_personal_access_token": "jam_pat_…",
+  "jam_team_id": "240214cc-9ec4-4aa6-a9a5-c2cd34b7e272"
+}
+```
+
+Aliases such as `user_id`, `jam_pat`, `group_jam`, and nested `"notion"` / `"jam"` objects are also accepted. Then tap **Save & validate**.
+
+Status chips on task detail: **On Testing**, **On Feedback**, **Hold Test**, **Archived** (unknown presets prompt for a custom status name).
+
+During card testing, the recording badge and tap ripples can hide (`hideRecordingChromeDuringQaTest`, default true); use the objective panel or Android notification **Stop testing**.

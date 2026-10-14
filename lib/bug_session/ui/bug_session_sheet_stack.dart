@@ -42,19 +42,23 @@ class BugSessionSheetStack extends StatefulWidget {
       );
       await showModalBottomSheet<void>(
         context: modalContext,
+        useRootNavigator: true,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
         isDismissible: true,
         enableDrag: true,
-        builder: (ctx) => BugSessionSheetStack(
-          kit: kit,
-          title: title,
-          initialRoute: initialRoute,
-          routes: routes,
-          initialArguments: initialArguments,
-          maxHeightFactor: maxHeightFactor,
-          titleForRoute: titleForRoute,
-        ),
+        builder: (ctx) {
+          kit.sheetCoordinator.attachExclusiveModal(ctx);
+          return BugSessionSheetStack(
+            kit: kit,
+            title: title,
+            initialRoute: initialRoute,
+            routes: routes,
+            initialArguments: initialArguments,
+            maxHeightFactor: maxHeightFactor,
+            titleForRoute: titleForRoute,
+          );
+        },
       );
     });
   }

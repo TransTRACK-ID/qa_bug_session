@@ -11,6 +11,7 @@ import '../recording/bug_session_recorder.dart';
 import '../models/visual_evidence_frame.dart';
 import 'bug_session_catalog_entry.dart';
 import 'bug_session_export_filename.dart';
+import 'bug_session_recording_kind.dart';
 import 'bug_session_store.dart';
 
 abstract interface class BugSessionCatalog {
@@ -22,6 +23,8 @@ abstract interface class BugSessionCatalog {
     BugSession session, {
     Map<String, List<int>> visualArchiveFiles,
     String? displayName,
+    String? jamShareUrl,
+    required BugSessionRecordingKind recordingKind,
   });
 
   Future<BugSessionCatalogEntry> renameSession(
@@ -40,6 +43,12 @@ abstract interface class BugSessionCatalog {
 
   Future<void> delete(String sessionId);
 
+  Future<void> deleteSessions(Iterable<String> sessionIds);
+
+  Future<List<BugSessionCatalogEntry>> exportSessionsToDisk(
+    Iterable<String> sessionIds,
+  );
+
   Future<void> clearAll();
 
   Future<bool> containsSession(String sessionId);
@@ -47,6 +56,13 @@ abstract interface class BugSessionCatalog {
   Future<String?> getLastSessionId();
 
   Future<void> restoreRecorderLastSession(BugSessionRecorder recorder);
+
+  Future<void> purgeVideoForSession(String sessionId);
+
+  Future<BugSessionCatalogEntry?> updateJamShareUrl(
+    String sessionId,
+    String jamShareUrl,
+  );
 }
 
 class FileBugSessionCatalog implements BugSessionCatalog {
@@ -54,9 +70,12 @@ class FileBugSessionCatalog implements BugSessionCatalog {
     required BugSessionStore store,
     BugSessionExportWriter? exportWriter,
     BugSessionImportReader? importReader,
+    this.includeVideoInSessionZip = false,
   })  : _store = store,
         _exportWriter = exportWriter ?? BugSessionExportWriter(),
         _importReader = importReader ?? BugSessionImportReader();
+
+  final bool includeVideoInSessionZip;
 
   final BugSessionStore _store;
   final BugSessionExportWriter _exportWriter;
@@ -152,6 +171,7 @@ class FileBugSessionCatalog implements BugSessionCatalog {
   BugSessionCatalogEntry _entryFromSession(
     BugSession session, {
     required BugSessionCatalogSource source,
+    required BugSessionRecordingKind recordingKind,
     String? filePath,
     String? displayName,
   }) {
@@ -172,6 +192,7 @@ class FileBugSessionCatalog implements BugSessionCatalog {
       buildNumber: manifest.buildNumber,
       environment: manifest.environment,
       userDisplayHint: manifest.user.displayHint,
+      recordingKind: recordingKind,
     );
   }
 
@@ -180,24 +201,33 @@ class FileBugSessionCatalog implements BugSessionCatalog {
     BugSession session, {
     Map<String, List<int>> visualArchiveFiles = const {},
     String? displayName,
+    String? jamShareUrl,
+    required BugSessionRecordingKind recordingKind,
   }) async {
     await _ensureLoaded();
     final id = session.manifest.sessionId;
-    final stored = _mergeVisualArchiveIntoSession(session, visualArchiveFiles);
+    final Map<String, List<int>> archiveFiles =
+        includeVideoInSessionZip ? visualArchiveFiles : {};
+    final stored = _mergeVisualArchiveIntoSession(session, archiveFiles);
     _memorySessions[id] = stored;
-    if (visualArchiveFiles.isNotEmpty) {
-      _visualArchiveBySession[id] = visualArchiveFiles;
+    if (archiveFiles.isNotEmpty) {
+      _visualArchiveBySession[id] = archiveFiles;
     }
-    final videoSidecarPath =
-        await _persistVideoSidecar(id, visualArchiveFiles);
+    final videoSidecarPath = includeVideoInSessionZip
+        ? await _persistVideoSidecar(id, archiveFiles)
+        : null;
     _entries.removeWhere((e) => e.sessionId == id);
     final entry = _entryFromSession(
       stored,
       source: BugSessionCatalogSource.recorded,
+      recordingKind: recordingKind,
       displayName: displayName,
-    ).copyWith(videoSidecarPath: videoSidecarPath);
+    ).copyWith(
+      videoSidecarPath: videoSidecarPath,
+      jamShareUrl: jamShareUrl,
+    );
     _entries.insert(0, entry);
-    await _persistSessionArchive(stored, visualArchiveFiles);
+    await _persistSessionArchive(stored, archiveFiles);
     await _markLastSession(id);
     await _writeIndex();
     _emit();
@@ -226,6 +256,34 @@ class FileBugSessionCatalog implements BugSessionCatalog {
     return _entries[index];
   }
 
+  Future<File> _resolveExportZipFile({
+    required String sessionId,
+    required String displayName,
+    required DateTime startedAt,
+    String? currentFilePath,
+  }) async {
+    await _store.ensureLayout();
+    final baseName = bugSessionExportZipBasename(
+      sessionId: sessionId,
+      displayName: displayName,
+      startedAt: startedAt,
+    );
+    var file = _store.exportZipFile(baseName);
+    if (!await file.exists() || currentFilePath == file.path) {
+      return file;
+    }
+    final tail = sessionId.length > 8
+        ? sessionId.substring(sessionId.length - 8)
+        : sessionId;
+    final disambiguated = bugSessionExportZipBasename(
+      sessionId: sessionId,
+      displayName: displayName,
+      startedAt: startedAt,
+      disambiguateSuffix: tail,
+    );
+    return _store.exportZipFile(disambiguated);
+  }
+
   Future<BugSessionCatalogEntry> _reconcileExportZipName(
     BugSessionCatalogEntry entry,
   ) async {
@@ -233,12 +291,12 @@ class FileBugSessionCatalog implements BugSessionCatalog {
     if (oldPath == null) {
       return entry;
     }
-    final basename = bugSessionExportZipBasename(
+    final newFile = await _resolveExportZipFile(
       sessionId: entry.sessionId,
       displayName: entry.displayName,
       startedAt: entry.startedAt,
+      currentFilePath: oldPath,
     );
-    final newFile = _store.exportZipFile(basename);
     if (newFile.path == oldPath) {
       return entry;
     }
@@ -288,12 +346,11 @@ class FileBugSessionCatalog implements BugSessionCatalog {
           startedAt: session.manifest.startedAt,
           actionCount: session.actions.length,
         );
-    final basename = bugSessionExportZipBasename(
+    final zipFile = await _resolveExportZipFile(
       sessionId: id,
       displayName: displayName,
       startedAt: session.manifest.startedAt,
     );
-    final zipFile = _store.exportZipFile(basename);
     final visualFiles = await _visualFilesFromZipBytes(bytes);
     await _exportWriter.writeToFile(
       session: session,
@@ -307,6 +364,7 @@ class FileBugSessionCatalog implements BugSessionCatalog {
     final entry = _entryFromSession(
       session,
       source: BugSessionCatalogSource.imported,
+      recordingKind: BugSessionRecordingKind.imported,
       filePath: zipFile.path,
       displayName: displayName,
     ).copyWith(videoSidecarPath: videoSidecarPath);
@@ -326,12 +384,12 @@ class FileBugSessionCatalog implements BugSessionCatalog {
       throw StateError('Unknown session $sessionId');
     }
     final entry = _entries[index];
-    final basename = bugSessionExportZipBasename(
+    final zipFile = await _resolveExportZipFile(
       sessionId: sessionId,
       displayName: entry.displayName,
       startedAt: entry.startedAt,
+      currentFilePath: entry.filePath,
     );
-    final zipFile = _store.exportZipFile(basename);
     final oldPath = entry.filePath;
     if (oldPath != null && oldPath != zipFile.path) {
       final oldFile = File(oldPath);
@@ -369,6 +427,9 @@ class FileBugSessionCatalog implements BugSessionCatalog {
     String sessionId,
     BugSessionCatalogEntry entry,
   ) async {
+    if (!includeVideoInSessionZip) {
+      return const {};
+    }
     final memory = _visualArchiveBySession[sessionId];
     if (memory != null && memory.isNotEmpty) {
       return memory.map((key, value) => MapEntry(key, value));
@@ -466,6 +527,24 @@ class FileBugSessionCatalog implements BugSessionCatalog {
   }
 
   @override
+  Future<void> deleteSessions(Iterable<String> sessionIds) async {
+    for (final id in sessionIds) {
+      await delete(id);
+    }
+  }
+
+  @override
+  Future<List<BugSessionCatalogEntry>> exportSessionsToDisk(
+    Iterable<String> sessionIds,
+  ) async {
+    final exported = <BugSessionCatalogEntry>[];
+    for (final id in sessionIds) {
+      exported.add(await exportSessionToDisk(id));
+    }
+    return exported;
+  }
+
+  @override
   Future<void> delete(String sessionId) async {
     await _ensureLoaded();
     _memorySessions.remove(sessionId);
@@ -532,5 +611,46 @@ class FileBugSessionCatalog implements BugSessionCatalog {
       if (e.sessionId == sessionId) return e;
     }
     return null;
+  }
+
+  @override
+  Future<void> purgeVideoForSession(String sessionId) async {
+    await _ensureLoaded();
+    _visualArchiveBySession.remove(sessionId);
+    final index = _entries.indexWhere((e) => e.sessionId == sessionId);
+    if (index < 0) {
+      return;
+    }
+    final entry = _entries[index];
+    final sidecar = entry.videoSidecarPath;
+    if (sidecar != null) {
+      final file = File(sidecar);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    }
+    _entries[index] = entry.copyWith(clearVideoSidecarPath: true);
+    await _writeIndex();
+    _emit();
+    if (entry.filePath != null) {
+      await exportSessionToDisk(sessionId);
+    }
+  }
+
+  @override
+  Future<BugSessionCatalogEntry?> updateJamShareUrl(
+    String sessionId,
+    String jamShareUrl,
+  ) async {
+    await _ensureLoaded();
+    final index = _entries.indexWhere((e) => e.sessionId == sessionId);
+    if (index < 0) {
+      return null;
+    }
+    _entries[index] =
+        _entries[index].copyWith(jamShareUrl: jamShareUrl.trim());
+    await _writeIndex();
+    _emit();
+    return _entries[index];
   }
 }

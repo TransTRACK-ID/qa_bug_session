@@ -1,26 +1,30 @@
-/// Builds a human-readable export zip name from QA [displayName].
+/// Sanitizes [displayName] for use in export zip filenames.
+String bugSessionExportNameSlug(String displayName) {
+  var slug = displayName.trim();
+  slug = slug.replaceAll(RegExp(r'[/\\:\0]'), '-');
+  slug = slug.replaceAll(RegExp(r'\s+'), ' ');
+  if (slug.length > 80) {
+    slug = slug.substring(0, 80).trimRight();
+  }
+  if (slug.isEmpty) {
+    return 'session';
+  }
+  return slug;
+}
+
+/// Builds export zip basename: `{displayName}_BugSesh.zip`.
+///
+/// When [disambiguateSuffix] is set (e.g. last 8 chars of session id), produces
+/// `{displayName}-{suffix}_BugSesh.zip`.
 String bugSessionExportZipBasename({
   required String sessionId,
   required String displayName,
   required DateTime startedAt,
+  String? disambiguateSuffix,
 }) {
-  var slug = displayName.trim().toLowerCase().replaceAll(
-        RegExp(r'[^a-z0-9]+'),
-        '-',
-      );
-  slug = slug.replaceAll(RegExp(r'-+'), '-');
-  slug = slug.replaceAll(RegExp(r'^-|-$'), '');
-  if (slug.isEmpty) {
-    slug = 'session';
-  } else if (slug.length > 48) {
-    slug = slug.substring(0, 48);
+  final slug = bugSessionExportNameSlug(displayName);
+  if (disambiguateSuffix != null && disambiguateSuffix.isNotEmpty) {
+    return '$slug-${disambiguateSuffix}_BugSesh.zip';
   }
-
-  final local = startedAt.toLocal();
-  final date =
-      '${local.year}${local.month.toString().padLeft(2, '0')}${local.day.toString().padLeft(2, '0')}';
-  final tail = sessionId.length > 12
-      ? sessionId.substring(sessionId.length - 12)
-      : sessionId;
-  return 'bug-session-$slug-$date-$tail.zip';
+  return '${slug}_BugSesh.zip';
 }

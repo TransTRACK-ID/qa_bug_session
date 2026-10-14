@@ -14,8 +14,8 @@ bool bugSessionChromeHitAt(Offset global) {
     for (final entry in result.path) {
       final target = entry.target;
       if (target is RenderSemanticsAnnotations) {
-        final label = target.properties.label;
-        if (label == 'BugSession') {
+        final props = target.properties;
+        if (props.label == 'BugSession' || props.identifier == 'BugSession') {
           return true;
         }
       }

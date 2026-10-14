@@ -94,6 +94,27 @@ bool _looksLikeAuthRoute(String route) {
       lower == 'auth';
 }
 
+/// Optional navbar tab from `session_start` navigation JSON (`activeTab`).
+String? bugSessionParseSessionStartActiveTab(String? payload) {
+  if (payload == null || payload.isEmpty) {
+    return null;
+  }
+  final trimmed = payload.trim();
+  if (!trimmed.startsWith('{')) {
+    return null;
+  }
+  try {
+    final decoded = jsonDecode(trimmed) as Map<String, dynamic>;
+    final tab = decoded['activeTab'];
+    if (tab is String && tab.isNotEmpty) {
+      return tab;
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
 /// Parses route name from BugSession navigation JSON or plain route label.
 String? bugSessionParseRouteName(String? payload) {
   if (payload == null || payload.isEmpty) {

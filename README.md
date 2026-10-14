@@ -10,6 +10,12 @@ This package is **TransTRACK original code** for the BugSession product. It is *
 - Upstream interaction-recorder and inspector packages remain separate projects with their own licenses; we do **not** claim their names or trademarks.
 - Package name and repository are **distinct** from pub.dev homonyms to avoid confusion.
 
+## Host implementation (agents / new apps)
+
+**Read first:** [docs/HOST_IMPLEMENTATION.md](docs/HOST_IMPLEMENTATION.md) — full checklist so wiring is not left half-done (navigator key, text/`RecorderInput`, design-system search traps, rich route args, Jam store, stop via `REPLAY` badge).
+
+Also: [docs/REPLAY_AND_SHADOWPLAY.md](docs/REPLAY_AND_SHADOWPLAY.md) · [docs/NOTION_READY_TO_TEST.md](docs/NOTION_READY_TO_TEST.md) · [tools/README.md](tools/README.md)
+
 ## Quick start
 
 ```yaml
@@ -17,7 +23,7 @@ dependencies:
   qa_bug_session:
     git:
       url: https://github.com/TransTRACK-ID/qa_bug_session.git
-      ref: v1.0.0
+      ref: v1.5.3
 ```
 
 ```dart
@@ -47,9 +53,9 @@ Future<void> main() async {
 }
 ```
 
-Register taps with `RecorderTap` (recorder is picked up from `BugSessionScope` when omitted). Attach Dio with `kit.attachDio(dio)`.
+Register taps with `RecorderTap` (recorder is picked up from `BugSessionScope` when omitted). Wrap text fields with `RecorderInput` (shared `TextEditingController`). Attach Dio with `kit.attachDio(dio)`.
 
-Debug / internal QA builds only. See [ARCHITECTURE.md](ARCHITECTURE.md).
+Debug / internal QA builds only. See [ARCHITECTURE.md](ARCHITECTURE.md). Setup alone is **not** a complete integration — finish [docs/HOST_IMPLEMENTATION.md](docs/HOST_IMPLEMENTATION.md).
 
 ### Recorder registry codegen (host app)
 
@@ -69,15 +75,18 @@ Details: [tools/README.md](tools/README.md).
 dart run path/to/qa_bug_session/tools/setup_bug_session.dart --project-dir /path/to/app --with-registry
 ```
 
-Generates host wiring under `lib/bug_session/` and updates `pubspec.yaml`; see generated `INTEGRATION.md`.
+Generates host wiring under `lib/bug_session/` and updates `pubspec.yaml`. Then complete the [host implementation checklist](docs/HOST_IMPLEMENTATION.md) (text inputs, search, navigation replay, Jam store).
 
 ## Add to a new project in 5 minutes
 
-1. Add the git dependency and run `flutter pub get`.
-2. Implement `CredentialInjector` against your token storage.
-3. Provide `environmentBuilder` with package id, app version, and QA user/credential at export time.
-4. Wrap `MaterialApp` with `kit.wrap` and `kit.wrapMaterialAppBuilder()`.
-5. Gate `enabled: false` in production/store builds.
+1. Add the git dependency (`ref: v1.5.3` or newer) and run `flutter pub get`.
+2. Run zero-touch setup (`tools/setup_bug_session.sh`) or hand-wire kit + wrap.
+3. Implement `CredentialInjector` against your token storage.
+4. Provide `environmentBuilder` with package id, app version, and QA user/credential at export time.
+5. Wrap `MaterialApp` with `kit.wrap` and `kit.wrapMaterialAppBuilder()`.
+6. Wire `replayNavigation`, `RecorderTap` / registry, and **`RecorderInput` on text/search**.
+7. Gate `enabled: false` in production/store builds.
+8. Smoke-test Instant Replay → Save clip → Replay; stop via top-right **REPLAY** badge.
 
 ## Security
 

@@ -286,7 +286,8 @@ void _wireRegistryImport(
   );
   content = content.replaceFirst(
     '// BUG_SESSION_REGISTRY resolveRecorderTargetId',
-    'resolveRecorderTargetId: resolveBugSessionRecorderTargetId,',
+    'resolveRecorderTargetId: resolveBugSessionRecorderTargetId,\n'
+    '      resolveTapScreenLabel: bugSessionTapScreenLabel,',
   );
   kitFile.writeAsStringSync(content);
 }

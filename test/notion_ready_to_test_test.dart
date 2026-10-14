@@ -2,6 +2,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:qa_bug_session/notion/notion.dart';
 
 void main() {
+  group('readNotionBodySection', () {
+    test('reads expected and actual under headings', () {
+      const blocks = [
+        NotionHeadingBlock(level: 3, text: 'Module'),
+        NotionParagraphBlock(text: 'Login'),
+        NotionHeadingBlock(level: 3, text: 'Expected'),
+        NotionParagraphBlock(text: 'User sees dashboard'),
+        NotionHeadingBlock(level: 3, text: 'Actual'),
+        NotionParagraphBlock(text: 'Blank screen'),
+      ];
+      expect(readNotionBodySection(blocks, 'expected'), 'User sees dashboard');
+      expect(readNotionBodySection(blocks, 'actual'), 'Blank screen');
+    });
+
+    test('includes todos under a section when present', () {
+      const blocks = [
+        NotionHeadingBlock(level: 3, text: 'Expected'),
+        NotionTodoBlock(
+          blockId: 'todo-1',
+          text: 'Verify on staging',
+          checked: false,
+        ),
+      ];
+      expect(readNotionBodySection(blocks, 'expected'), 'Verify on staging');
+    });
+  });
+
   group('extractNotionPageId', () {
     test('parses dashed uuid', () {
       expect(
@@ -71,6 +98,18 @@ void main() {
       final filter = queryBody['filter']! as Map<String, dynamic>;
       final and = filter['and'] as List;
       expect(and.length, 3);
+      expect(and[0], {
+        'or': [
+          {
+            'property': 'Status',
+            'status': {'equals': 'Ready to Test'},
+          },
+          {
+            'property': 'Status',
+            'status': {'equals': 'On Testing'},
+          },
+        ],
+      });
       expect(and[1], {
         'property': 'QA',
         'people': {'contains': 'qa-user-1'},

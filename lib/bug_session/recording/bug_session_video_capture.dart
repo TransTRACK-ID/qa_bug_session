@@ -13,6 +13,12 @@ abstract interface class BugSessionDeferrableVideoCapture
   Future<void> haltCapture();
 
   Future<BugSessionVideoArtifact?> finalizeCapture();
+
+  /// Waits until at least [minimum] frames are buffered or [timeout] elapses.
+  Future<void> waitForMinimumFrames({
+    int minimum = 1,
+    Duration timeout = const Duration(seconds: 6),
+  });
 }
 
 class BugSessionVideoArtifact {
@@ -20,9 +26,13 @@ class BugSessionVideoArtifact {
     required this.bytes,
     required this.archiveFileName,
     required this.mimeType,
+    this.width,
+    this.height,
   });
 
   final Uint8List bytes;
   final String archiveFileName;
   final String mimeType;
+  final int? width;
+  final int? height;
 }

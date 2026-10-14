@@ -25,12 +25,13 @@ class GlassPanel extends StatelessWidget {
           sigmaX: theme.blurSigma,
           sigmaY: theme.blurSigma,
         ),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: theme.panelTint,
+        child: Material(
+          color: theme.panelTint,
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(theme.cornerRadius),
-            border: Border.all(color: theme.borderColor),
+            side: BorderSide(color: theme.borderColor),
           ),
+          clipBehavior: Clip.antiAlias,
           child: Padding(padding: padding, child: child),
         ),
       ),

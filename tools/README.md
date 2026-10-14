@@ -27,7 +27,9 @@ The script:
 
 Gate: **`dev`**, **`development`**, **`staging`** flavors only.
 
-Requires **`qa_bug_session` v1.3.0+** (git ref in pubspec).
+Requires **`qa_bug_session` v1.3.0+** (git ref in pubspec). For text replay, empty clears, and current overlay stop UX use **v1.5.3+**.
+
+Setup is scaffolding only. Complete **[docs/HOST_IMPLEMENTATION.md](../docs/HOST_IMPLEMENTATION.md)** afterward (`RecorderInput`, search controllers, rich navigation args, `jamDevCredentialsStore`, auto_route navigator key).
 
 ### Ready to Test (Notion)
 

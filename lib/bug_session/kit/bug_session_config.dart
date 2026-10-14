@@ -11,6 +11,8 @@ import '../replay/replay_result.dart';
 import '../shadowplay/shadowplay_settings.dart';
 import '../runtime/bug_session_environment.dart';
 import '../security/credential_injector.dart';
+import '../../jam/jam_dev_connection.dart';
+import '../../notion/qa_bug_template_config.dart';
 import '../../notion/ready_to_test_connection.dart';
 import 'bug_session_file_picker.dart';
 import 'bug_session_theme.dart';
@@ -23,6 +25,12 @@ typedef BugSessionNavigationReplay = Future<void> Function(
 typedef BugSessionReplayBootstrap = Future<void> Function(BugSession session);
 
 typedef BugSessionPrepareReplay = Future<void> Function(BugSession session);
+
+/// Host may adjust the action list after package defaults (trim/dedupe).
+typedef BugSessionPrepareRecordedActions = List<RecordedAction> Function(
+  BugSession session,
+  List<RecordedAction> actions,
+);
 
 typedef BugSessionReplaySettle = Future<void> Function({
   required RecordedAction completedAction,
@@ -38,6 +46,12 @@ typedef BugSessionTryReplayAction = Future<bool> Function(
   bool Function()? shouldStop,
 });
 
+/// Host-specific text replay. Return true if handled.
+typedef BugSessionTryReplayTextInput = Future<bool> Function(
+  RecordedAction action, {
+  bool Function()? shouldStop,
+});
+
 /// Prefer normalized tap metadata over recorded global pixels when set.
 typedef BugSessionResolveReplayTapPosition = Offset? Function(
   RecordedAction action,
@@ -48,6 +62,12 @@ typedef BugSessionResolveRecorderTargetId = String? Function(
   RecordedAction action,
 );
 
+/// Host hook: human screen label for a tap (e.g. HomePage inside Navbar tabs).
+typedef BugSessionResolveTapScreenLabel = String? Function(
+  BuildContext context,
+  String routeKey,
+);
+
 typedef BugSessionScreenshotCapture = Future<Uint8List?> Function();
 
 /// Opens the platform share sheet (e.g. WhatsApp) for an exported zip path.
@@ -55,10 +75,12 @@ class BugSessionShareExportRequest {
   const BugSessionShareExportRequest({
     required this.zipPath,
     this.videoPath,
+    this.jamRecordingUrl,
   });
 
   final String zipPath;
   final String? videoPath;
+  final String? jamRecordingUrl;
 }
 
 typedef BugSessionShareExport = Future<void> Function(
@@ -66,6 +88,13 @@ typedef BugSessionShareExport = Future<void> Function(
 );
 
 typedef BugSessionReplayFinished = Future<void> Function(ReplayResult result);
+
+typedef QaTestingModuleLabelResolver = String Function(
+  List<RecordedAction> actions,
+  String? currentRoute,
+);
+
+typedef QaIssueZipUpload = Future<String?> Function(Uint8List zipBytes);
 
 @immutable
 class BugSessionConfig {
@@ -92,18 +121,28 @@ class BugSessionConfig {
     this.restoreSessionAfterReplay = false,
     this.replayBootstrap,
     this.prepareForReplay,
+    this.prepareRecordedActionsForReplay,
     this.replaySettle,
     this.replayStepDelay = const Duration(milliseconds: 900),
     this.tryReplayAction,
+    this.tryReplayTextInput,
     this.resolveReplayTapPosition,
     this.resolveRecorderTargetId,
     this.currentRouteName,
+    this.activeNavbarTabRouteName,
+    this.resolveTapScreenLabel,
     this.shadowplay = const BugSessionShadowplaySettings(),
     this.manualRecordWithShadowplay = false,
     this.onReplayFinished,
     this.expandPanelWhenSheetClosed = true,
     this.readyToTestStore,
     this.readyToTestDefaults,
+    this.qaBugTemplate = const QaBugTemplateConfig(),
+    this.jamDevCredentialsStore,
+    this.hideRecordingChromeDuringQaTest = true,
+    this.resolveTestingModuleLabel,
+    this.uploadIssueZipBytes,
+    this.includeVideoInSessionZip = false,
   });
 
   final bool enabled;
@@ -152,6 +191,9 @@ class BugSessionConfig {
   /// Host hook before credential injection (e.g. logout for login-flow replay).
   final BugSessionPrepareReplay? prepareForReplay;
 
+  /// Optional final pass on actions after [bugSessionPrepareActionsForReplay].
+  final BugSessionPrepareRecordedActions? prepareRecordedActionsForReplay;
+
   /// Wait for async UI (API + navigation) before the next replay step.
   final BugSessionReplaySettle? replaySettle;
 
@@ -160,12 +202,20 @@ class BugSessionConfig {
 
   final BugSessionTryReplayAction? tryReplayAction;
 
+  final BugSessionTryReplayTextInput? tryReplayTextInput;
+
   final BugSessionResolveReplayTapPosition? resolveReplayTapPosition;
 
   final BugSessionResolveRecorderTargetId? resolveRecorderTargetId;
 
+  /// When set, used for step reproduce screen names (AutoTabs, etc.).
+  final BugSessionResolveTapScreenLabel? resolveTapScreenLabel;
+
   /// Host route name (e.g. auto_route [StackRouter.current.name]).
   final BugSessionCurrentRouteName? currentRouteName;
+
+  /// Active bottom-nav tab route (e.g. `HomeRoute`) while shell is visible.
+  final BugSessionCurrentRouteName? activeNavbarTabRouteName;
 
   /// Shadowplay rolling-buffer recording (save snapshot vs classic record/stop).
   final BugSessionShadowplaySettings shadowplay;
@@ -184,6 +234,19 @@ class BugSessionConfig {
 
   /// Status / property names for Notion filters (ids entered by QA in-app).
   final ReadyToTestSetupDefaults? readyToTestDefaults;
+
+  final QaBugTemplateConfig qaBugTemplate;
+
+  final JamDevCredentialsStore? jamDevCredentialsStore;
+
+  final bool hideRecordingChromeDuringQaTest;
+
+  final QaTestingModuleLabelResolver? resolveTestingModuleLabel;
+
+  final QaIssueZipUpload? uploadIssueZipBytes;
+
+  /// When false (default), session zips and share sheets omit MP4/GIF (use Jam).
+  final bool includeVideoInSessionZip;
 
   bool get readyToTestEnabled =>
       readyToTestStore != null && readyToTestDefaults != null;

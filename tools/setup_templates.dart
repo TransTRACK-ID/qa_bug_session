@@ -652,6 +652,7 @@ Future<void> initializeBugSession() async {
       validateUserIdentityOnReplay: false,
       restoreSessionAfterReplay: false,
       currentRouteName: bugSessionCurrentRouteName,
+      resolveTapScreenLabel: bugSessionTapScreenLabel,
       shareExport: shareBugSessionZipExport,
       openShareSheetAfterExport: true,
       // BUG_SESSION_REGISTRY resolveRecorderTargetId
@@ -874,13 +875,17 @@ Future<void> shareBugSessionZipExport(BugSessionShareExportRequest request) asyn
     }
   }
 
+  final jamLine = request.jamRecordingUrl != null &&
+          request.jamRecordingUrl!.isNotEmpty
+      ? 'Jam recording: \${request.jamRecordingUrl}\\n\\n'
+      : '';
   const caption =
       'BugSession export — may contain credentials. Share only with trusted recipients.';
 
   await Share.shareXFiles(
     files,
     subject: caption,
-    text: Platform.isAndroid ? null : caption,
+    text: jamLine + caption,
   );
 }
 ''';

@@ -8,7 +8,11 @@ Standalone Flutter package for TransTRACK apps. Host apps integrate by:
 2. Initializing `BugSessionKit` with `CredentialInjector` and `environmentBuilder`
 3. Wrapping the app with `kit.wrap` + `MaterialApp.builder` from `wrapMaterialAppBuilder`
 4. Wrapping interactive widgets with `RecorderTap` (optional explicit `BugSessionRecorder`)
-5. Calling `kit.attachDio(dio)` so network events reach the in-memory recorder
+5. Wrapping text/search fields with `RecorderInput` (shared `TextEditingController`)
+6. Calling `kit.attachDio(dio)` so network events reach the in-memory recorder
+7. Implementing `replayNavigation` / bootstrap / optional `tryReplayAction` for live replay
+
+**Agent checklist for a complete host:** [docs/HOST_IMPLEMENTATION.md](docs/HOST_IMPLEMENTATION.md).
 
 ## Navigation / HTTP / auth (host responsibilities)
 

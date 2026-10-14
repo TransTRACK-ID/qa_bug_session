@@ -83,18 +83,20 @@ class NotionClient {
       options: Options(method: method),
     );
 
+    final status = response.statusCode ?? 0;
     final data = response.data;
     if (data == null) {
       throw NotionApiException(
-        code: 'empty_response',
-        message: 'Empty response from Notion ($method $path)',
+        code: status >= 400 ? status.toString() : 'empty_response',
+        message: 'Empty response from Notion ($method $path, HTTP $status)',
       );
     }
 
-    if (data['object'] == 'error') {
+    if (status >= 400 || data['object'] == 'error') {
       throw NotionApiException(
-        code: data['code']?.toString() ?? 'unknown',
-        message: data['message']?.toString() ?? 'Unknown Notion API error',
+        code: data['code']?.toString() ?? status.toString(),
+        message: data['message']?.toString() ??
+            'Notion API error ($method $path, HTTP $status)',
       );
     }
 
@@ -201,6 +203,66 @@ class NotionClient {
         },
       },
     );
+  }
+
+  Future<Map<String, dynamic>> createPage({
+    required Map<String, dynamic> parent,
+    required Map<String, dynamic> properties,
+    List<Map<String, dynamic>>? children,
+  }) async {
+    final body = <String, dynamic>{
+      'parent': parent,
+      'properties': properties,
+    };
+    if (children != null && children.isNotEmpty) {
+      body['children'] = children;
+    }
+    return request('POST', '/pages', body: body);
+  }
+
+  Future<void> updatePageProperties({
+    required String pageId,
+    required Map<String, dynamic> properties,
+  }) async {
+    await request(
+      'PATCH',
+      '/pages/$pageId',
+      body: {'properties': properties},
+    );
+  }
+
+  Future<void> appendBlockChildren({
+    required String blockId,
+    required List<Map<String, dynamic>> children,
+  }) async {
+    await request(
+      'PATCH',
+      '/blocks/$blockId/children',
+      body: {'children': children},
+    );
+  }
+
+  Future<Map<String, dynamic>> createComment({
+    required String pageId,
+    required String plainText,
+  }) async {
+    return request(
+      'POST',
+      '/comments',
+      body: {
+        'parent': {'page_id': pageId},
+        'rich_text': [
+          {
+            'type': 'text',
+            'text': {'content': plainText},
+          },
+        ],
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> getDataSource(String dataSourceId) {
+    return request('GET', '/data_sources/$dataSourceId');
   }
 }
 
